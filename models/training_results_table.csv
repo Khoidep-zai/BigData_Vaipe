@@ -1,0 +1,4 @@
+model,epochs_ran,best_epoch,best_val_acc,final_train_acc,final_val_acc,final_gap,eval_accuracy,eval_macro_f1
+resnet50,5,4,0.5000,0.5000,0.2000,0.3000,0.2000,0.1333
+efficientnet_b0,5,5,0.3750,0.5000,0.1000,0.4000,0.3000,0.1958
+vit_b_16,5,5,0.5000,0.5833,0.4000,0.1833,0.2000,0.1333

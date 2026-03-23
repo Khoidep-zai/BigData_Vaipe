@@ -1,262 +1,222 @@
-# THUOC - Phan loai vien thuoc tu anh (CLI-first)
+# THUOC - Hướng Dẫn Dễ Hiểu Cho Người Mới
 
-Tai lieu nay duoc chuan hoa theo mau nop do an: muc tieu, phuong phap, ket qua, va cach chay.
+THUOC là đồ án phân loại viên thuốc từ ảnh. Bạn không cần hiểu sâu về AI vẫn có thể chạy được toàn bộ quy trình nếu làm theo đúng các bước trong tài liệu này.
 
-## 1. Muc tieu de tai
+## Bạn Sẽ Nhận Được Gì Sau Khi Chạy?
 
-Xay dung he thong phan loai vien thuoc tu anh, ho tro:
-1. Train nhieu backbone (ResNet-50, EfficientNet-B0, ViT-B/16).
-2. Danh gia chat luong mo hinh bang cac chi so va bieu do.
-3. Suy luan tu dong tren anh moi, co ket hop metadata thuoc.
-4. Van hanh theo huong CLI-first, de tai lap va de bao cao.
+Sau khi chạy xong, hệ thống sẽ tự tạo:
+1. 3 mô hình đã huấn luyện (ResNet50, EfficientNet-B0, ViT-B/16).
+2. Bảng kết quả so sánh Accuracy và Macro-F1.
+3. Biểu đồ so sánh mô hình.
+4. Confusion matrix cho từng mô hình và ensemble.
 
-## 2. Cau truc thu muc cap nhat
+## Kết Quả Hiện Tại
+
+Mô hình đã được huấn luyện thành công với 5 epoch (early stop do gap train/val vượt ngưỡng). Kết quả đánh giá trên test set:
+
+| Model | Accuracy | Macro-F1 | Best Epoch | Train/Val Gap |
+|---|---:|---:|---:|---:|
+| ResNet50 | 20.0% | 0.1333 | Epoch 4 | 0.30 |
+| EfficientNet-B0 | 30.0% | 0.1958 | Epoch 5 | 0.40 |
+| ViT-B/16 | 20.0% | 0.1333 | Epoch 5 | 0.18 |
+
+*Ghi chú: Kết quả thấp là do dataset nhỏ (10 mẫu test) và validation set hạn chế. Hãy tăng kích cỡ dữ liệu hoặc điều chỉnh hyperparameter để cải thiện.*
+
+## Chạy Nhanh Trong 5 Phút
+
+### Bước 1: Cài thư viện
+
+```bash
+pip install -r requirements.txt
+```
+
+### Bước 2: Kiểm tra dữ liệu
+
+Bạn cần một trong hai thư mục dữ liệu sau:
+1. data_aligned
+2. data
+
+Mỗi thư mục dữ liệu phải có đủ 3 split:
+1. train
+2. val
+3. test
+
+### Bước 3: Chạy toàn bộ pipeline
+
+```bash
+python run_all.py
+```
+
+Đây là lệnh quan trọng nhất. Lệnh này sẽ train, evaluate và xuất report tự động.
+
+## Chạy Trên Google Colab
+
+Bạn có notebook sẵn sàng cho Colab tại: `THUOC_Colab_Train_Evaluate.ipynb`
+
+### Cách dùng:
+1. Mở file notebook này trên Google Colab.
+2. Chạy Cell 1 và sửa `REPO_URL` thành repo GitHub thật của bạn.
+3. Nếu dữ liệu nằm trong Google Drive, giữ `USE_DRIVE_DATA = True` và sửa `DRIVE_DATA_ROOT` đúng.
+4. Chạy lần lượt từ Cell 2 đến Cell 9.
+
+**Lợi ích:**
+- Train trên GPU miễn phí của Colab (nhanh hơn CPU 10-50 lần).
+- Tự động sinh đầy đủ checkpoint, metrics, confusion matrix.
+- Đóng gói output thành ZIP để tải về hoặc lưu lại Drive.
+
+## Lệnh Quan Trọng Nhất
+
+| Mục tiêu | Lệnh |
+|---|---|
+| Chạy toàn bộ 3 mô hình | python run_all.py |
+| Chạy 1 mô hình | python run_all.py --model resnet50 |
+| Chỉ evaluate model đã train | python run_all.py --compare-only |
+| Dùng CPU (nếu không có GPU) | python run_all.py --device cpu |
+| Chỉ định data thủ công | python run_all.py --data-dir data_aligned |
+
+## Kết Quả Nằm Ở Đâu?
+
+Sau khi chạy, bạn xem kết quả trong thư mục models:
+
+```text
+models/
+  resnet50_epillid_best.pt
+  efficientnet_b0_epillid_best.pt
+  vit_b_16_epillid_best.pt
+
+  resnet50_epillid_best.metrics.json
+  efficientnet_b0_epillid_best.metrics.json
+  vit_b_16_epillid_best.metrics.json
+
+  resnet50_epillid_history.json
+  efficientnet_b0_epillid_history.json
+  vit_b_16_epillid_history.json
+
+  resnet50_training_curves.png
+  efficientnet_b0_training_curves.png
+  vit_b_16_training_curves.png
+
+  evaluation_summary.csv
+  evaluation_comparison.png
+
+  reports/latest/
+    evaluation_summary.csv
+    evaluation_summary.json
+    evaluation_comparison.png
+    tuning_summary.json
+    confusion_matrix_resnet50.png
+    confusion_matrix_efficientnet_b0.png
+    confusion_matrix_vit_b_16.png
+    confusion_matrix_ensemble_weighted.png
+```
+
+Nếu bạn cần file để nộp đồ án, phần quan trọng nhất là:
+1. models/evaluation_summary.csv
+2. models/evaluation_comparison.png
+3. models/reports/latest/evaluation_summary.json
+4. models/reports/latest/confusion_matrix_*.png
+5. models/*_epillid_best.pt (3 checkpoint)
+6. models/*_training_curves.png (3 biểu đồ)
+
+## Sơ Đồ Dòng Chạy (Đơn Giản)
+
+```mermaid
+flowchart LR
+  A[Du lieu: data_aligned hoac data] --> B[python run_all.py]
+  B --> C[Train 3 model]
+  C --> D[Evaluate]
+  D --> E[Xuat CSV JSON PNG]
+```
+
+## Khi Nào Dùng train_cli.py?
+
+run_all.py đã đủ cho hầu hết trường hợp. Chỉ dùng train_cli.py khi bạn muốn can thiệp sâu hơn.
+
+```bash
+# Full pipeline (chi tiet)
+python train_cli.py --mode all --epochs 28 --batch-size 16
+
+# Train 1 model
+python train_cli.py --mode single --model resnet50 --epochs 28
+
+# Train + review nhieu vong
+python train_cli.py --mode optimize --rounds 3 --epochs 12
+```
+
+## Hyperparameter Mặc Định Hiện Tại
+
+Cấu hình này lấy trực tiếp từ optimal_configs.py:
+
+| Model | lr | weight_decay | label_smoothing | mixup_alpha | epochs | early_stop_patience |
+|---|---:|---:|---:|---:|---:|---:|
+| ResNet50 | 6e-5 | 1.2e-3 | 0.16 | 0.35 | 28 | 6 |
+| EfficientNet-B0 | 7e-5 | 1e-3 | 0.15 | 0.33 | 28 | 6 |
+| ViT-B/16 | 5e-5 | 1.4e-3 | 0.20 | 0.42 | 32 | 7 |
+
+## File Quan Trọng Để Nộp Đồ Án
+
+Chuẩn bị trước khi nộp:
+
+1. **Source code**: Thư mục `src/` đầy đủ với tất cả module.
+2. **Checkpoint**: 3 file `*_epillid_best.pt` trong `models/`.
+3. **Kết quả evaluate**: `models/evaluation_summary.csv` + `models/evaluation_summary.json`.
+4. **Biểu đồ so sánh**: `models/evaluation_comparison.png`.
+5. **Training curves**: 3 file `*_training_curves.png` trong `models/`.
+6. **Confusion matrix**: Tất cả file `confusion_matrix_*.png` trong `models/reports/latest/`.
+7. **README.md** (file này).
+
+## Cấu Trúc Thư Mục (Tóm Tắt)
 
 ```text
 THUOC/
-  README.md
-  requirements.txt
+  run_all.py
   train_cli.py
   review_terminal.py
-  run_gui.py
-  THUOC_FitLab_GPU_End2End.ipynb
-
-  data/
-    Medicine_Details_Deeplearning.csv
-    train/<class_name>/*
-    val/<class_name>/*
-    test/<class_name>/*
-
-  data_aligned/
-    train/<class_name>/*
-    val/<class_name>/*
-    test/<class_name>/*
-
-  demo_images/
-    <class_name>/*
-
-  models/
-    *_epillid_best.pt
-    *_epillid_best.metrics.json
-    *_epillid_history.json
-    *_training_curves.png
-    evaluation_summary.csv
-    terminal_review_history.json
-    reports/latest/
-      evaluation_summary.csv
-      evaluation_summary.json
-      evaluation_comparison.png
-      confusion_matrix_*.png
-
+  optimal_configs.py
+  requirements.txt
+  THUOC_Colab_Train_Evaluate.ipynb
   src/
-    build_epillid_data.py
-    evaluate_report.py
-    features.py
-    gui_tk.py
-    inference.py
-    metadata.py
-    models.py
-    pipeline.py
-    self_learning.py
-    train.py
-
+  data/ hoặc data_aligned/
+  models/
   tests/
-    test_features.py
-    test_inference_utils.py
-    test_metadata.py
 ```
 
-## 3. Phuong phap va kien truc
-
-Thanh phan chinh:
-1. Data layer: doc va chuan hoa anh theo split train/val/test.
-2. Model layer: train backbone, early stopping, luu checkpoint tot nhat.
-3. Evaluation layer: tong hop chi so, ve chart va confusion matrix.
-4. Inference layer: so sanh dac trung anh, auto ensemble, ket hop metadata.
-
-Suy luan ket hop:
-1. Diem truc quan (similarity, color, size, texture).
-2. Dieu kien ngu nghia tu metadata (mapping class-thuoc).
-
-## 4. Luong hoat dong end-to-end
-
-```mermaid
-flowchart TD
-  A[Input du lieu data_aligned hoac data] --> B[train_cli.py]
-  B --> C{mode}
-
-  C -->|single| D[Train 1 backbone]
-  C -->|all| E[Train 3 backbone + ensemble]
-  C -->|optimize| F[review_terminal.py nhieu vong]
-
-  D --> G[models: checkpoint + metrics + history]
-  E --> G
-  F --> G
-
-  G --> H[src.evaluate_report.py]
-  H --> I[reports/latest: CSV JSON chart confusion matrix]
-
-  G --> J[src.inference.py]
-  K[Medicine_Details_Deeplearning.csv] --> L[src.metadata.py]
-  L --> J
-  J --> M[Ket qua du doan + giai thich]
-```
-
-## 5. Luong chay tren Colab GPU
-
-```mermaid
-flowchart TD
-  A[Mo notebook tu GitHub tren Colab] --> B[Bat Runtime GPU]
-  B --> C[Chay cell cau hinh]
-  C --> D[Tu clone repo va xac dinh ROOT]
-  D --> E[Cai requirements]
-  E --> F[Phat hien CUDA va chon device]
-  F --> G[Auto tim data_aligned hoac data]
-  G --> H[Train evaluate theo notebook]
-  H --> I[Luu artifact vao models va reports]
-  I --> J[Hien thi bieu do va demo inference]
-```
-
-Notebook su dung cho Colab:
-- [THUOC_FitLab_GPU_End2End.ipynb](THUOC_FitLab_GPU_End2End.ipynb)
-
-## 6. Ket qua dau ra can nop
-
-Toi thieu nen co:
-1. Checkpoint tung model trong models.
-2. File metrics va history tung model.
-3. Bieu do training curves.
-4. Bao cao tong hop:
-   - evaluation_summary.csv
-   - evaluation_summary.json
-   - evaluation_comparison.png
-   - confusion_matrix cua tung model va ensemble
-
-## 7. Cách Chạy - Quick Start & Tùy Chọn
-
-### 🚀 7.1 Cách Nhanh Nhất (ALL-IN-ONE)
+## Kiểm Thử Nhanh
 
 ```bash
-cd THUOC
-python run_all.py
-```
-
-✓ Train 3 models với optimal hyperparameters  
-✓ Evaluate + Confusion Matrix + Reports  
-✓ Generate CSV, JSON, PNG  
-⏱️ Thời gian: 20-40 phút (GPU)
-
-### 7.2 Tùy Chọn Khác
-
-```bash
-# Train 1 model
-python run_all.py --model resnet50
-
-# Chỉ so sánh kết quả (không train)
-python run_all.py --compare-only
-
-# Dùng CPU (chậm hơn)
-python run_all.py --device cpu
-
-# Custom data directory
-python run_all.py --data-dir data_aligned
-```
-
-### 7.3 Advanced (train_cli.py - Chi tiết hơn)
-
-```bash
-# Full pipeline
-python train_cli.py --mode all --epochs 25 --batch-size 16
-
-# 1 model
-python train_cli.py --mode single --model resnet50 --epochs 20
-
-# Auto-tuning (tìm optimal config - lâu: 2-4 giờ)
-python optimize_hyperparams.py --data-dir data --device cuda
-```
-
-### 7.4 Chạy Trên Google Colab
-
-**File**: `THUOC_Colab_Train_Evaluate.ipynb`
-
-1. Mở notebook trên Google Colab
-2. Đổi `PROJECT_DIR` → đường dẫn Google Drive của bạn
-3. Cell 11 & 12 → Tự động train & evaluate (đã cập nhật optimal configs)
-4. Xem kết quả CSV, PNG, confusion matrix
-
----
-
-## 8. Kết Quả Output (Sau khi chạy run_all.py)
-
-```
-models/
-├── resnet50_epillid_best.pt              # Checkpoint
-├── efficientnet_b0_epillid_best.pt
-├── vit_b_16_epillid_best.pt
-├── evaluation_summary.csv                # Accuracy, F1-score
-├── evaluation_summary.json
-├── evaluation_comparison.png             # Bar chart so sánh
-├── *_epillid_training_curves.png         # Train/Val curves (3 file)
-└── reports/latest/
-    ├── confusion_matrix_resnet50.png
-    ├── confusion_matrix_efficientnet_b0.png
-    ├── confusion_matrix_vit_b_16.png
-    ├── confusion_matrix_ensemble.png
-    └── evaluation_summary.csv
-```
-
----
-
-## 9. Hyperparameter Tối Ưu Hóa (Train/Val Sát Nhau)
-
-| Model | lr | weight_decay | label_smooth | mixup |
-|-------|-----|------|--------|-------|
-| **ResNet50** | 8e-5 | 1e-3 | 0.15 | 0.30 |
-| **EfficientNet-B0** | 1e-4 | 8e-4 | 0.15 | 0.32 |
-| **ViT-B/16** | 1e-4 | 1.2e-3 | 0.18 | 0.38 |
-
-📝 **Edit** `optimal_configs.py` để thay đổi
-
----
-
-## 10. Kiểm Thử & Xác Thực
-
-```bash
-# Run tests
 python -m pytest tests/ -q
-
-# Kiểm tra data integrity
-python -c "from src.features import PillImageDataset; ds = PillImageDataset('data', split='train'); print(f'Train images: {len(ds)}')"
 ```
 
----
+## Lỗi Thường Gặp Và Cách Xử Lý
 
-## 11. Các Updates & Tối Ưu (v2.0 - Mar 2026)
+1. **Lỗi không thấy dữ liệu:**
+Chắc chắn bạn có data_aligned hoặc data và bên trong có train/val/test.
 
-✅ **run_all.py**: All-in-one setup (train + eval + report trong 1 lệnh)  
-✅ **optimal_configs.py**: Hyperparameters đã tối ưu cho 3 models  
-✅ **Colab Notebook**: Cập nhật Cell 11-12 (optimal hyperparams + evaluation)  
-✅ **Bug Fixes**: UTF-8 encoding, checkpoint loading, confusion matrix  
-✅ **Cleanup**: Xóa unnecessary scripts (train_optimized.py, etc.)  
-✅ **Documentation**: README đầy đủ & sẵn sàng nộp
+2. **Lỗi CUDA không khả dụng:**
+Chạy lại với CPU.
 
----
+```bash
+python run_all.py --device cpu
+```
 
-## 12. Hướng Dẫn Nộp Đồ Án
+3. **Accuracy thấp (dưới 50%):**
+Dataset quá nhỏ hoặc class imbalance. Hãy:
+- Tăng kích cỡ dataset.
+- Điều chỉnh hyperparameter: giảm lr, tăng epochs.
+- Chạy lại với: `python run_all.py --data-dir data_aligned`
 
-Chuẩn bị:
+4. **Muốn nộp đồ án nhưng thiếu report:**
+Chạy lại lệnh all-in-one để hệ thống sinh đủ file.
 
-1. **Source Code**: `src/` folder đầy đủ
-2. **Checkpoints**: 3 file `*_epillid_best.pt`
-3. **Reports**:
-   - `models/evaluation_summary.csv`
-   - `models/evaluation_comparison.png`
-   - `models/reports/latest/confusion_matrix_*.png` (3+ file)
-   - `models/*_epillid_training_curves.png` (3+ file)
-
-Chạy:
 ```bash
 python run_all.py
 ```
 
-Nộp: Folder `models/` + `src/` + `README.md`
+## Checklist Trước Khi Nộp
+
+1. Đã có đủ 3 checkpoint trong models.
+2. Đã có evaluation_summary.csv và evaluation_comparison.png.
+3. Đã có confusion matrix trong models/reports/latest.
+4. Đã có training curves cho cả 3 model.
+5. README này đi kèm source code.
+6. Kiểm tra git status: `git status` (không nên có uncommitted changes).

@@ -6,12 +6,12 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, Subset
 from tqdm import tqdm
 
 from .features import PillImageDataset, build_transforms
@@ -79,6 +79,18 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Freeze backbone for first N epochs to keep train/val curves more stable on very small datasets",
     )
+    parser.add_argument(
+        "--validation-split",
+        type=float,
+        default=0.15,
+        help="If val set is too small, stratified holdout ratio sampled from train",
+    )
+    parser.add_argument(
+        "--min-val-samples",
+        type=int,
+        default=24,
+        help="Minimum validation sample target before enabling train->val stratified holdout",
+    )
     return parser.parse_args()
 
 
@@ -105,37 +117,104 @@ def _set_backbone_trainable(model: nn.Module, model_name: str, trainable: bool) 
 
 
 def create_dataloaders(
-    data_dir: str, batch_size: int, num_workers: int, pin_memory: bool = False
-) -> Tuple[DataLoader, DataLoader]:
+    data_dir: str,
+    batch_size: int,
+    num_workers: int,
+    pin_memory: bool = False,
+    seed: int = 42,
+    validation_split: float = 0.15,
+    min_val_samples: int = 24,
+) -> Tuple[DataLoader, DataLoader, DataLoader]:
     train_root = os.path.join(data_dir, "train")
     val_root = os.path.join(data_dir, "val")
 
     train_ds = PillImageDataset(train_root, transform=build_transforms(train=True))
+    train_eval_ds = PillImageDataset(
+        train_root,
+        transform=build_transforms(train=False),
+        class_to_idx=train_ds.class_to_idx,
+    )
     val_ds = PillImageDataset(
         val_root,
         transform=build_transforms(train=False),
         class_to_idx=train_ds.class_to_idx,
     )
 
+    effective_batch_size = max(1, int(batch_size))
+    if len(train_ds) < 8:
+        # For tiny datasets, prefer a smaller suggested batch and always clamp to dataset size.
+        suggested = max(2, min(8, len(train_ds) // 2))
+        effective_batch_size = min(effective_batch_size, suggested)
+    effective_batch_size = min(effective_batch_size, max(1, len(train_ds)))
+
+    train_dataset_for_loader = train_ds
+    train_eval_dataset_for_loader = train_eval_ds
+    val_dataset_for_loader = val_ds
+
+    # If validation set is too small, create an additional stratified holdout from train.
+    if len(val_ds) < max(1, int(min_val_samples)) and len(train_ds) > len(train_ds.class_to_idx):
+        split = max(0.05, min(float(validation_split), 0.4))
+        rng = np.random.default_rng(int(seed))
+
+        label_to_indices: Dict[int, List[int]] = {}
+        for idx, sample in enumerate(train_ds.samples):
+            label_to_indices.setdefault(int(sample.label), []).append(idx)
+
+        holdout_indices: List[int] = []
+        keep_indices: List[int] = []
+        for _label, indices in label_to_indices.items():
+            cls_indices = list(indices)
+            rng.shuffle(cls_indices)
+
+            if len(cls_indices) <= 2:
+                n_holdout = 0
+            else:
+                n_holdout = int(round(len(cls_indices) * split))
+                n_holdout = max(1, n_holdout)
+                n_holdout = min(n_holdout, len(cls_indices) - 1)
+
+            holdout_indices.extend(cls_indices[:n_holdout])
+            keep_indices.extend(cls_indices[n_holdout:])
+
+        # Use holdout only if it is meaningful and still leaves train samples.
+        if holdout_indices and keep_indices:
+            holdout_ds = Subset(train_eval_ds, holdout_indices)
+            train_dataset_for_loader = Subset(train_ds, keep_indices)
+            train_eval_dataset_for_loader = Subset(train_eval_ds, keep_indices)
+            if len(val_ds) > 0:
+                val_dataset_for_loader = ConcatDataset([val_ds, holdout_ds])
+            else:
+                val_dataset_for_loader = holdout_ds
+
     # Use uniform sampling (disabled class weighting for better train/val gap visibility)
     sampler = None
+    shuffle_generator = torch.Generator()
+    shuffle_generator.manual_seed(int(seed))
 
     train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
-        shuffle=False,
+        train_dataset_for_loader,
+        batch_size=effective_batch_size,
+        shuffle=(sampler is None),
         sampler=sampler,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        generator=shuffle_generator,
+    )
+    train_metric_loader = DataLoader(
+        train_eval_dataset_for_loader,
+        batch_size=min(effective_batch_size, max(1, len(train_eval_dataset_for_loader))),
+        shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
     val_loader = DataLoader(
-        val_ds,
-        batch_size=batch_size,
+        val_dataset_for_loader,
+        batch_size=min(effective_batch_size, max(len(val_dataset_for_loader), 1)),
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
-    return train_loader, val_loader
+    return train_loader, val_loader, train_metric_loader
 
 
 def _mixup_batch(
@@ -285,6 +364,28 @@ def _stage_name(epoch: int, freeze_backbone_epochs: int) -> str:
     return "stage-1"
 
 
+def _resolve_class_to_idx(dataset: torch.utils.data.Dataset) -> Dict[str, int]:
+    # train_loader.dataset can be a Subset/ConcatDataset after stratified holdout.
+    mapping = getattr(dataset, "class_to_idx", None)
+    if isinstance(mapping, dict) and mapping:
+        return mapping
+
+    if isinstance(dataset, Subset):
+        return _resolve_class_to_idx(dataset.dataset)
+
+    if isinstance(dataset, ConcatDataset):
+        for child in dataset.datasets:
+            child_mapping = getattr(child, "class_to_idx", None)
+            if isinstance(child_mapping, dict) and child_mapping:
+                return child_mapping
+            if isinstance(child, (Subset, ConcatDataset)):
+                nested_mapping = _resolve_class_to_idx(child)
+                if nested_mapping:
+                    return nested_mapping
+
+    raise AttributeError("Unable to resolve class_to_idx from dataset")
+
+
 def train(args: argparse.Namespace | None = None) -> None:
     if args is None:
         args = parse_args()
@@ -307,11 +408,18 @@ def train(args: argparse.Namespace | None = None) -> None:
     use_amp = device.type == "cuda"
     pin_memory = device.type == "cuda"
 
-    train_loader, val_loader = create_dataloaders(
-        args.data_dir, args.batch_size, args.num_workers, pin_memory=pin_memory
+    train_loader, val_loader, train_metric_loader = create_dataloaders(
+        args.data_dir,
+        args.batch_size,
+        args.num_workers,
+        pin_memory=pin_memory,
+        seed=int(getattr(args, "seed", 42)),
+        validation_split=float(getattr(args, "validation_split", 0.15)),
+        min_val_samples=int(getattr(args, "min_val_samples", 24)),
     )
 
-    num_classes = len(train_loader.dataset.class_to_idx)
+    class_to_idx = _resolve_class_to_idx(train_loader.dataset)
+    num_classes = len(class_to_idx)
     # Use uniform loss weights (disabled class weighting for better train/val gap visibility)
     class_weight_tensor = None
 
@@ -325,6 +433,31 @@ def train(args: argparse.Namespace | None = None) -> None:
 
     label_smoothing = float(getattr(args, "label_smoothing", 0.1))
     mixup_alpha = float(getattr(args, "mixup_alpha", 0.2))
+    n_train = len(train_loader.dataset)
+    n_val = len(val_loader.dataset)
+
+    max_large_gap_epochs = 2
+    gap_guard_start_epoch = 3
+    if n_train <= 64:
+        # On very small datasets, heavy regularization often pushes val acc to 0 for CNN backbones.
+        label_smoothing = min(label_smoothing, 0.05)
+        mixup_alpha = min(mixup_alpha, 0.08)
+        if args.model in {"resnet50", "efficientnet_b0"} and float(args.lr) < 1.8e-4:
+            args.lr = 1.8e-4
+        if int(getattr(args, "freeze_backbone_epochs", 0)) > 2:
+            args.freeze_backbone_epochs = 2
+        if int(getattr(args, "early_stop_patience", 5)) < 8:
+            args.early_stop_patience = 8
+        max_large_gap_epochs = 1
+        gap_guard_start_epoch = 5
+
+    print(
+        "[INFO] data_profile "
+        f"train_samples={n_train} val_samples={n_val} "
+        f"train_batches={len(train_loader)} val_batches={len(val_loader)} "
+        f"label_smoothing={label_smoothing:.3f} mixup_alpha={mixup_alpha:.3f} "
+        f"lr={float(args.lr):.6f} freeze_backbone_epochs={int(getattr(args, 'freeze_backbone_epochs', 0))}"
+    )
     criterion = nn.CrossEntropyLoss(
         weight=class_weight_tensor,
         label_smoothing=label_smoothing,
@@ -365,7 +498,7 @@ def train(args: argparse.Namespace | None = None) -> None:
     if os.path.exists(ckpt_path):
         try:
             ckpt_class_to_idx = load_checkpoint_class_to_idx(ckpt_path, map_location="cpu")
-            current_class_to_idx = train_loader.dataset.class_to_idx
+            current_class_to_idx = class_to_idx
             if ckpt_class_to_idx and ckpt_class_to_idx != current_class_to_idx:
                 LOGGER.warning(
                     "Checkpoint class mapping mismatch for %s. Resetting best metrics to retrain on new label space.",
@@ -452,8 +585,9 @@ def train(args: argparse.Namespace | None = None) -> None:
             running_total += labels.size(0)
             pbar.set_postfix(mat_mat=loss.item())
 
-        epoch_loss = running_loss / len(train_loader.dataset)
-        train_acc = running_correct / max(running_total, 1)
+        epoch_loss = running_loss / max(len(train_loader.dataset), 1)
+        # Measure train accuracy on clean train samples (no mixup) for stable, comparable curves.
+        train_acc, _train_eval_loss = evaluate(model, train_metric_loader, device, criterion)
         val_acc, val_loss = evaluate(model, val_loader, device, criterion)
 
         history["epoch"].append(epoch)
@@ -463,7 +597,7 @@ def train(args: argparse.Namespace | None = None) -> None:
         history["val_acc"].append(float(val_acc))
 
         gap = float(train_acc - val_acc)
-        if gap > float(getattr(args, "max_train_val_gap", 0.18)) and epoch >= 3:
+        if gap > float(getattr(args, "max_train_val_gap", 0.18)) and epoch >= gap_guard_start_epoch:
             epochs_with_large_gap += 1
         else:
             epochs_with_large_gap = 0
@@ -496,7 +630,7 @@ def train(args: argparse.Namespace | None = None) -> None:
                 {
                     "model_state_dict": model.state_dict(),
                     "num_classes": num_classes,
-                    "class_to_idx": train_loader.dataset.class_to_idx,
+                    "class_to_idx": class_to_idx,
                     "val_acc": val_acc,
                 },
                 ckpt_path,
@@ -533,7 +667,7 @@ def train(args: argparse.Namespace | None = None) -> None:
             )
             break
 
-        if epochs_with_large_gap >= 2:
+        if epochs_with_large_gap >= max_large_gap_epochs:
             print(
                 f"Dung som tai vong {epoch} "
                 f"(train-val gap={gap:.4f} vuot nguong {float(getattr(args, 'max_train_val_gap', 0.18)):.4f})."

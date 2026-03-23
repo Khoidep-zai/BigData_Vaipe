@@ -22,6 +22,7 @@ Chạy trên Colab: python run_all.py --device cuda (sẽ tự detect GPU)
 """
 
 import argparse
+import csv
 import json
 import subprocess
 import sys
@@ -82,6 +83,9 @@ def train_models(
         if not config:
             print(f"[SKIP] Không có config cho {model_name}")
             continue
+
+        model_gap = float(config.get("max_train_val_gap", max_train_val_gap))
+        model_freeze_epochs = int(config.get("freeze_backbone_epochs", freeze_backbone_epochs))
         
         cmd = [
             sys.executable,
@@ -111,9 +115,9 @@ def train_models(
             "--seed",
             str(seed),
             "--max-train-val-gap",
-            str(max_train_val_gap),
+            str(model_gap),
             "--freeze-backbone-epochs",
-            str(freeze_backbone_epochs),
+            str(model_freeze_epochs),
             "--device",
             device,
             "--output-dir",
@@ -163,6 +167,191 @@ def evaluate_models(
     return run_cmd(cmd, "Evaluating Models & Generating Reports")
 
 
+def _safe_float(value: object) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_metric(value: Optional[float]) -> str:
+    if value is None:
+        return ""
+    return f"{value:.4f}"
+
+
+def _load_json_file(path: Path) -> Dict:
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _load_eval_map(summary_csv: Path) -> Dict[str, Dict[str, float]]:
+    eval_map: Dict[str, Dict[str, float]] = {}
+    if not summary_csv.exists():
+        return eval_map
+
+    try:
+        with open(summary_csv, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                model_name = (row.get("model") or "").strip()
+                if not model_name:
+                    continue
+                eval_map[model_name] = {
+                    "accuracy": _safe_float(row.get("accuracy")) or 0.0,
+                    "macro_f1": _safe_float(row.get("macro_f1")) or 0.0,
+                }
+    except Exception:
+        return {}
+
+    return eval_map
+
+
+def _print_table(headers: List[str], rows: List[List[str]]) -> None:
+    if not rows:
+        return
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    def _line(values: List[str]) -> str:
+        return " | ".join(v.ljust(widths[i]) for i, v in enumerate(values))
+
+    sep = "-+-".join("-" * w for w in widths)
+    print(_line(headers))
+    print(sep)
+    for row in rows:
+        print(_line(row))
+
+
+def export_training_tables(models: List[str], output_dir: str = "models") -> None:
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    eval_map = _load_eval_map(output_root / "evaluation_summary.csv")
+    rows: List[Dict[str, str]] = []
+
+    for model in models:
+        history = _load_json_file(output_root / f"{model}_epillid_history.json")
+        metrics = _load_json_file(output_root / f"{model}_epillid_best.metrics.json")
+
+        epochs = history.get("epoch", []) if isinstance(history.get("epoch", []), list) else []
+        train_acc = history.get("train_acc", []) if isinstance(history.get("train_acc", []), list) else []
+        val_acc = history.get("val_acc", []) if isinstance(history.get("val_acc", []), list) else []
+
+        n_epochs = len(epochs)
+        last_train = _safe_float(train_acc[-1]) if train_acc else None
+        last_val = _safe_float(val_acc[-1]) if val_acc else None
+        final_gap = (last_train - last_val) if (last_train is not None and last_val is not None) else None
+
+        best_val_hist = None
+        best_epoch_hist = None
+        if val_acc and epochs and len(val_acc) == len(epochs):
+            valid_indices = [i for i in range(len(val_acc)) if _safe_float(val_acc[i]) is not None]
+            if valid_indices:
+                best_idx = max(valid_indices, key=lambda i: _safe_float(val_acc[i]) or float("-inf"))
+                best_val_hist = _safe_float(val_acc[best_idx])
+                if best_val_hist is not None and best_idx < len(epochs):
+                    best_epoch_hist = int(epochs[best_idx])
+
+        best_val_metric = _safe_float(metrics.get("best_val_acc"))
+        best_val = best_val_metric if best_val_metric is not None else best_val_hist
+        best_epoch_value = metrics.get("best_val_epoch")
+        if best_epoch_value is None:
+            best_epoch_value = metrics.get("epochs")
+        if best_epoch_value is None:
+            best_epoch_value = best_epoch_hist
+        best_epoch = int(best_epoch_value) if best_epoch_value is not None else 0
+
+        eval_item = eval_map.get(model, {})
+        eval_acc = _safe_float(eval_item.get("accuracy"))
+        eval_f1 = _safe_float(eval_item.get("macro_f1"))
+
+        rows.append(
+            {
+                "model": model,
+                "epochs_ran": str(n_epochs),
+                "best_epoch": str(best_epoch),
+                "best_val_acc": _format_metric(best_val),
+                "final_train_acc": _format_metric(last_train),
+                "final_val_acc": _format_metric(last_val),
+                "final_gap": _format_metric(final_gap),
+                "eval_accuracy": _format_metric(eval_acc),
+                "eval_macro_f1": _format_metric(eval_f1),
+            }
+        )
+
+    fieldnames = [
+        "model",
+        "epochs_ran",
+        "best_epoch",
+        "best_val_acc",
+        "final_train_acc",
+        "final_val_acc",
+        "final_gap",
+        "eval_accuracy",
+        "eval_macro_f1",
+    ]
+
+    csv_path = output_root / "training_results_table.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    md_path = output_root / "training_results_table.md"
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write("| Model | Epochs Ran | Best Epoch | Best Val Acc | Final Train Acc | Final Val Acc | Final Gap | Eval Accuracy | Eval Macro F1 |\n")
+        f.write("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+        for row in rows:
+            f.write(
+                f"| {row['model']} | {row['epochs_ran']} | {row['best_epoch']} | {row['best_val_acc']} | {row['final_train_acc']} | {row['final_val_acc']} | {row['final_gap']} | {row['eval_accuracy']} | {row['eval_macro_f1']} |\n"
+            )
+
+    print(f"\n{'='*70}")
+    print("📋 BẢNG TỔNG HỢP KẾT QUẢ TRAIN")
+    print(f"{'='*70}")
+    headers = [
+        "Model",
+        "Epochs",
+        "BestEp",
+        "BestVal",
+        "FinalTr",
+        "FinalVal",
+        "Gap",
+        "EvalAcc",
+        "EvalF1",
+    ]
+    table_rows = [
+        [
+            r["model"],
+            r["epochs_ran"],
+            r["best_epoch"],
+            r["best_val_acc"],
+            r["final_train_acc"],
+            r["final_val_acc"],
+            r["final_gap"],
+            r["eval_accuracy"],
+            r["eval_macro_f1"],
+        ]
+        for r in rows
+    ]
+    _print_table(headers, table_rows)
+    print(f"Saved table CSV: {csv_path}")
+    print(f"Saved table MD:  {md_path}")
+
+
 def display_results(output_dir: str = "models") -> None:
     """Hiển thị kết quả"""
     summary_csv = Path(output_dir) / "evaluation_summary.csv"
@@ -183,6 +372,8 @@ def display_results(output_dir: str = "models") -> None:
     print(f"  CSV:           {output_dir}/evaluation_summary.csv")
     print(f"  JSON:          {output_dir}/evaluation_summary.json")
     print(f"  Chart:         {output_dir}/evaluation_comparison.png")
+    print(f"  Train Table:   {output_dir}/training_results_table.csv")
+    print(f"  Train TableMD: {output_dir}/training_results_table.md")
     print(f"  Report Dir:    {output_dir}/reports/latest/")
     print(f"  Training Curves: {output_dir}/*_epillid_training_curves.png")
     print(f"  Confusion Matrix: {output_dir}/reports/latest/confusion_matrix_*.png")
@@ -235,14 +426,14 @@ Examples:
     parser.add_argument(
         "--max-train-val-gap",
         type=float,
-        default=0.35,
-        help="Stop early when train-val accuracy gap stays above this threshold (default: 0.35)",
+        default=0.12,
+        help="Stop early when train-val accuracy gap stays above this threshold (default: 0.12)",
     )
     parser.add_argument(
         "--freeze-backbone-epochs",
         type=int,
-        default=0,
-        help="Freeze backbone first N epochs to reduce train/val divergence on small data (default: 0)",
+        default=3,
+        help="Freeze backbone first N epochs to reduce train/val divergence on small data (default: 3)",
     )
     parser.add_argument(
         "--output-dir",
@@ -327,6 +518,9 @@ Examples:
             device=args.device,
             output_dir=args.output_dir,
         )
+
+    # Export training/evaluation summary table after all runs.
+    export_training_tables(models=models, output_dir=args.output_dir)
     
     # Display
     display_results(args.output_dir)
