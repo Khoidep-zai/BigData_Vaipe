@@ -1,8 +1,77 @@
+# =============================================================================
+# THUOC Project Dependencies
+# Deep Learning Framework for Medicine Pill Classification
+# =============================================================================
+
+# --- CORE DEEP LEARNING (PyTorch Stack) ---
+# PyTorch: Deep learning framework (CPU/GPU support, dynamic graphs)
+# v2.0+: Mixed precision training, torch.compile, improved optimizer
 torch>=2.0.0
+
+# TorchVision: Computer vision utilities (pretrained models, transforms)
+# v0.15+: ImageNet normalization, data loading utilities
+# Used for: ResNet50, EfficientNet backbone training + inference
 torchvision>=0.15.0
+
+# --- DATA PROCESSING & VISUALIZATION ---
+# NumPy: Numerical computing (array operations, broadcasting)
+# v1.24+: np.array operations, batch transformations
 numpy>=1.24.0
+
+# Pillow (PIL): Image processing (load, resize, convert formats)
+# v10.0+: JPEG compression, PNG alpha channel, image filters
+# Used for: Loading medicine pill images from disk
 Pillow>=10.0.0
-scikit-learn>=1.3.0
-tqdm>=4.66.0
-matplotlib>=3.7.0
+
+# Pandas: Data manipulation & analysis (CSV export, DataFrame operations)
+# v2.0+: Improved performance, nullable dtypes
+# Used for: Saving evaluation_summary.csv, metrics aggregation
 pandas>=2.0.0
+
+# Matplotlib: Data visualization (plotting, charting)
+# v3.7+: Backend improvements, better font rendering
+# Used for: Training curves (loss/accuracy plots), confusion matrices, comparison charts
+matplotlib>=3.7.0
+
+# --- MACHINE LEARNING UTILITIES ---
+# Scikit-Learn: ML algorithms & metrics (classification metrics, confusion matrix)
+# v1.3+: Improved efficiency, better documentation
+# Used for: Computing Accuracy, Macro-F1, confusion_matrix for evaluation
+scikit-learn>=1.3.0
+
+# --- PROGRESS & LOGGING ---
+# tqdm: Progress bar for loops (visual feedback during training)
+# v4.66+: Rich formatting, Jupyter notebook support
+# Used for: Training progress bar (epochs, batches), data loading progress
+tqdm>=4.66.0
+
+# =============================================================================
+# OPTIONAL (Recommended for Advanced Users)
+# Uncomment if needed:
+# =============================================================================
+# timm: PyTorch Image Models (additional vision backbones beyond torchvision)
+# timm>=0.9.0  # For ViT (Vision Transformer) models if not using torchvision
+
+# tensorboard: Visualization toolkit (training monitoring dashboard)
+# tensorboard>=2.12.0  # For real-time training metrics tracking
+
+# jupyter: Interactive notebook environment (for Colab, local notebooks)
+# jupyter>=1.0.0  # For THUOC_Colab_Train_Evaluate.ipynb
+
+# =============================================================================
+# INSTALLATION TIPS
+# =============================================================================
+# Windows/CPU:
+#   pip install -r requirements.txt
+#
+# Windows/GPU (CUDA 11.8):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#   pip install -r requirements.txt
+#
+# Linux/GPU (CUDA 12.1):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install -r requirements.txt
+#
+# Google Colab (Notebook):
+#   !pip install -r requirements.txt  (PyTorch already installed)
+# =============================================================================
