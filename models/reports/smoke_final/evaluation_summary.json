@@ -1,0 +1,38 @@
+[
+    {
+        "model":  "resnet50",
+        "accuracy":  0.5,
+        "macro_f1":  0.43749999999999994,
+        "num_samples":  10,
+        "checkpoint":  "models/resnet50_epillid_best.pt",
+        "is_dev_run":  true,
+        "note":  "test split currently has 10 images"
+    },
+    {
+        "model":  "efficientnet_b0",
+        "accuracy":  0.2,
+        "macro_f1":  0.041666666666666664,
+        "num_samples":  10,
+        "checkpoint":  "models/efficientnet_b0_epillid_best.pt",
+        "is_dev_run":  true,
+        "note":  "test split currently has 10 images"
+    },
+    {
+        "model":  "vit_b_16",
+        "accuracy":  0.2,
+        "macro_f1":  0.0625,
+        "num_samples":  10,
+        "checkpoint":  "models/vit_b_16_epillid_best.pt",
+        "is_dev_run":  true,
+        "note":  "test split currently has 10 images"
+    },
+    {
+        "model":  "ensemble_weighted",
+        "accuracy":  0.2,
+        "macro_f1":  0.0625,
+        "num_samples":  10,
+        "checkpoint":  "multiple",
+        "is_dev_run":  true,
+        "note":  "test split currently has 10 images"
+    }
+]

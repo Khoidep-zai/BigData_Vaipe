@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Trained weights and generated visual artifacts
+models/**/*.pt
+models/**/*training_curves*.png
+models/**/confusion_matrix*.png
+models/**/evaluation_comparison*.png
+models/**/smoke_run.log
+models/**/terminal_review_history.json

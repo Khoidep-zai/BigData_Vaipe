@@ -1,0 +1,5 @@
+﻿model,accuracy,macro_f1,num_samples,checkpoint
+resnet50,0.2,0.13333333333333333,10,models/resnet50_epillid_best.pt
+efficientnet_b0,0.2,0.08571428571428572,10,models/efficientnet_b0_epillid_best.pt
+vit_b_16,0.2,0.11904761904761904,10,models/vit_b_16_epillid_best.pt
+ensemble_weighted,0.2,0.11904761904761904,10,multiple

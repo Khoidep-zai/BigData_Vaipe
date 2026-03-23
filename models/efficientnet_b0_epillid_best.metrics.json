@@ -1,0 +1,9 @@
+{
+  "best_val_acc": 0.125,
+  "epochs": 6,
+  "model": "efficientnet_b0",
+  "lr": 0.0001,
+  "weight_decay": 0.0003,
+  "label_smoothing": 0.08,
+  "mixup_alpha": 0.2
+}
