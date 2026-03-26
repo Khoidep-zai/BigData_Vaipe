@@ -1,0 +1,33 @@
+THUOC Educational Non-Commercial License v1.0
+Copyright (c) 2026 THUOC Project Contributors
+
+1. Purpose
+This project is released for educational, learning, and non-commercial research purposes only.
+
+2. Permissions (Non-Commercial Only)
+You are allowed to:
+- Use, run, and study this project.
+- Copy and modify the source code.
+- Share the original or modified source code for educational/non-commercial purposes.
+
+3. Restrictions
+You are NOT allowed to:
+- Use this project (or any substantial part of it) for commercial purposes.
+- Sell, sublicense, or redistribute this project as part of a paid product or service.
+- Use this project in a business workflow, paid consulting, or revenue-generating system.
+
+4. Attribution
+Any redistribution (original or modified) must keep this license file and provide clear attribution to the THUOC project.
+
+5. Third-Party Components
+This repository may include dependencies, pretrained models, datasets, or assets that are governed by their own licenses/terms.
+You are responsible for complying with those third-party licenses separately.
+
+6. No Warranty
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE.
+
+7. Termination
+If you violate this license, your rights under this license terminate automatically.
+
+By using, copying, modifying, or sharing this project, you agree to the terms above.
