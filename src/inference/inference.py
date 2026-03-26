@@ -91,16 +91,17 @@ def _get_or_load_model(
 def _extract_features(
     model: nn.Module, image_tensor: torch.Tensor, device: torch.device
 ) -> torch.Tensor:
-    """Trích đặc trưng penultimate-layer bằng forward hook (an toàn cho mọi kiến trúc)."""
+    """Trích xuất đặc trưng (feature vector) từ lớp áp chót bằng kỹ thuật forward hook (an toàn hơn việc cắt sửa mạng neural)."""
     model.eval()
     image_tensor = image_tensor.to(device)
 
     features: List[torch.Tensor] = []
 
     def _hook_fn(_module, _input, output):
+        # Hàm hook nội bộ: lưu output của layer vào danh sách `features`.
         features.append(output)
 
-    # Xác định layer cuối cùng trước classifier cho từng kiến trúc
+    # Tự động phát hiện kiểu kiến trúc (ResNet, EfficientNet, ViT) để gắn hook vào đúng lớp feature extraction.
     hook_handle = None
     if hasattr(model, "fc"):
         # ResNet-style: lấy output từ avgpool (trước fc)
@@ -112,7 +113,7 @@ def _extract_features(
         # ViT-style: lấy output từ encoder (trước heads)
         hook_handle = model.encoder.register_forward_hook(_hook_fn)
     else:
-        # Fallback: dùng logits làm features
+        # Trường hợp không tìm thấy layer phù hợp: dùng luôn output cuối cùng (logits) làm vector đặc trưng (dù không tối ưu bằng).
         with torch.no_grad():
             use_amp = device.type == "cuda"
             with torch.amp.autocast("cuda", enabled=use_amp):
@@ -140,11 +141,7 @@ def _extract_features(
 def _forward_logits_and_features(
     model: nn.Module, image_tensor: torch.Tensor, device: torch.device
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Run one forward pass and return both logits and normalized features.
-
-    This avoids running the same image multiple times when we need both
-    predicted class and feature vector.
-    """
+    """Chạy 1 lần forward pass nhưng lấy được cả nhãn dự đoán (logits) và vector đặc trưng (features) để tiết kiệm thời gian tính toán."""
     model.eval()
     image_tensor = image_tensor.to(device)
 
@@ -263,17 +260,17 @@ def compare_pill_images(
     sample_tensor = transform(sample_img_pil).unsqueeze(0)
     query_tensor = transform(query_img_pil).unsqueeze(0)
 
-    # Predict class + query features in one forward pass
+    # Predict class + extract query features in one forward pass for efficiency.
     query_logits, feat_query = _forward_logits_and_features(model, query_tensor, device)
     pred_idx = int(torch.argmax(query_logits, dim=1).item())
 
     predicted_class = inv_class_to_idx.get(pred_idx, f"class_{pred_idx}")
 
-    # Feature similarity
+    # Deep-feature cosine similarity captures shape/appearance similarity beyond raw pixels.
     feat_sample = _extract_features(model, sample_tensor, device)
     sim_score = _cosine_similarity(feat_sample, feat_query)
 
-    # Color, size, texture comparisons (mapped to 0-1 scores)
+    # Hand-crafted similarity signals complement deep features for practical pill matching.
     color_score = _compare_colors(sample_img_pil, query_img_pil)
     size_score = _compare_size(sample_img_pil, query_img_pil)
     texture_score = _compare_texture(sample_img_pil, query_img_pil)
@@ -294,6 +291,7 @@ def compare_pill_images(
         if metadata_expected.active_group and metadata_pred.active_group:
             semantic_group_match = metadata_expected.active_group == metadata_pred.active_group
 
+    # Penalize one feature when semantic drug group is inconsistent.
     semantic_penalty = 1 if not semantic_group_match else 0
     effective_true_features = max(0, true_features - semantic_penalty)
     is_true = class_match and (effective_true_features >= min_true_features)

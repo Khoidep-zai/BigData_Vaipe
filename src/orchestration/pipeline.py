@@ -52,7 +52,7 @@ def _stage(stage_idx: int, total_stages: int, message: str) -> None:
 
 def _resolve_device(device_str: str) -> str:
     if device_str == "cuda" and not torch.cuda.is_available():
-        print("[CANH_BAO] CUDA khong kha dung, tu dong chuyen sang CPU.", flush=True)
+        print("[CANH_BAO] CUDA (GPU) không khả dụng, tự động chuyển sang chạy bằng CPU.", flush=True)
         return "cpu"
     return device_str
 
@@ -73,7 +73,7 @@ def discover_data_dir(preferred: Optional[str] = None) -> str:
         root = Path(preferred)
         if not _is_valid_dataset_root(root):
             raise FileNotFoundError(
-                f"Invalid data dir: {root}. Expected train/val/test subfolders."
+                f"Thư mục dữ liệu không hợp lệ: {root}. Cần có đủ các thư mục con train, val, test."
             )
         return str(root)
 
@@ -81,10 +81,10 @@ def discover_data_dir(preferred: Optional[str] = None) -> str:
     valid = [c for c in candidates if _is_valid_dataset_root(c)]
     if not valid:
         raise FileNotFoundError(
-            "No valid dataset root found. Please provide --data-dir with train/val/test."
+            "Không tìm thấy thư mục dữ liệu hợp lệ. Vui lòng cung cấp --data-dir với train/val/test."
         )
 
-    # Prefer richer class layout when both exist.
+    # Ưu tiên chọn thư mục dữ liệu nào có nhiều lớp trong folder train hơn (nếu tìm thấy nhiều ứng viên).
     valid.sort(key=_count_train_classes, reverse=True)
     return str(valid[0])
 
@@ -177,6 +177,7 @@ def _evaluate_ensemble(
     dataset_class_to_idx: Dict[str, int],
     device: torch.device,
 ) -> Tuple[ModelEvalResult, List[str], List[str]]:
+    # Weighted soft-voting: each model contributes class probabilities scaled by validation quality.
     inv_true = {v: k for k, v in dataset_class_to_idx.items()}
 
     all_probs: List[Tuple[Dict[int, str], float, torch.Tensor]] = []
@@ -490,7 +491,7 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
         f"Da danh gia {ensemble_row.model}: acc={ensemble_row.accuracy:.4f}, macro_f1={ensemble_row.macro_f1:.4f}",
     )
 
-    # Stage 4: export report table + visual analysis.
+    # Stage 4: export report table + visual analysis artifacts.
     _stage(4, total_stages, "Xuat bao cao CSV/JSON va bieu do")
     summary_csv = report_dir / "evaluation_summary.csv"
     summary_json = report_dir / "evaluation_summary.json"

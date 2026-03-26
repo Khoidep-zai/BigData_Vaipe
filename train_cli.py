@@ -8,6 +8,7 @@ import review_terminal as review_module
 
 
 def main() -> None:
+    # Điểm truy cập dòng lệnh (CLI) duy nhất để chuyển đổi giữa các chế độ: chạy toàn bộ quy trình, huấn luyện 1 mô hình, hoặc chạy vòng lặp tối ưu hóa.
     parser = argparse.ArgumentParser(
         description="CLI for training pill models (single model or full pipeline)"
     )
@@ -65,6 +66,7 @@ def main() -> None:
     args, _ = parser.parse_known_args()
 
     if args.mode == "all":
+        # Chuyển toàn bộ tham số dòng lệnh sang tầng điều phối (orchestration) để thực hiện: huấn luyện + đánh giá + báo cáo.
         pipeline_args = argparse.Namespace(
             data_dir=args.data_dir,
             models="resnet50,efficientnet_b0,vit_b_16",
@@ -91,6 +93,7 @@ def main() -> None:
         return
 
     if args.mode == "optimize":
+        # Chạy các vòng lặp huấn luyện-đánh giá ngay trên cửa sổ lệnh (terminal) và lưu lại lịch sử quá trình tối ưu.
         review_args = argparse.Namespace(
             data_dir=args.data_dir,
             models_dir=args.output_dir,
@@ -121,7 +124,7 @@ def main() -> None:
         review_module.main_with_args(review_args)
         return
 
-    # single mode
+    # Chế độ single: lệnh chạy nhanh để huấn luyện duy nhất một loại mô hình (backbone).
     train_args = argparse.Namespace(
         data_dir=args.data_dir or "data_aligned",
         model=args.model,

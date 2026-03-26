@@ -21,6 +21,7 @@ DEFAULT_MODELS = ["resnet50", "efficientnet_b0", "vit_b_16"]
 
 
 def discover_data_dir(preferred: str | None) -> Path:
+    # Ưu tiên đường dẫn người dùng nhập, nếu không sẽ tự tìm trong các thư mục chuẩn (data, data_aligned).
     if preferred:
         root = Path(preferred)
         if not (root / "test").exists():
@@ -42,6 +43,7 @@ def resolve_device(device: str) -> torch.device:
 
 
 def load_weight_from_metrics(models_dir: Path, model_name: str) -> float:
+    # Quyết định trọng số cho Ensemble gộp: dựa trên độ chính xác (Accuracy) tốt nhất của từng mô hình trên tập Val.
     metrics_path = models_dir / f"{model_name}_epillid_best.metrics.json"
     if not metrics_path.exists():
         return 1.0
@@ -61,6 +63,7 @@ def evaluate_single_model(
     dataset_class_to_idx: Dict[str, int],
     device: torch.device,
 ) -> Tuple[Dict[str, float], List[str], List[str]]:
+    # Đánh giá một checkpoint, trả về cả chỉ số tổng hợp (Accuracy, F1) và danh sách nhãn dự đoán chi tiết.
     ckpt_class_to_idx = load_checkpoint_class_to_idx(str(checkpoint_path), map_location=device)
     num_classes = len(ckpt_class_to_idx) if ckpt_class_to_idx else len(dataset_class_to_idx)
 
@@ -109,6 +112,7 @@ def evaluate_weighted_ensemble(
     dataset_class_to_idx: Dict[str, int],
     device: torch.device,
 ) -> Dict[str, float]:
+    # Cơ chế Bầu cử mềm có trọng số (Weighted Soft-Voting) giữa các mô hình để đưa ra kết quả cuối cùng chính xác hơn.
     inv_true = {v: k for k, v in dataset_class_to_idx.items()}
 
     loaded = []
@@ -183,6 +187,7 @@ def blended_score(acc: float, macro_f1: float) -> float:
 
 
 def print_table(rows: List[Dict[str, float]]) -> None:
+    # Render fixed-width terminal table to compare models quickly without plots.
     headers = ["model", "accuracy", "macro_f1", "blend", "num_samples", "verdict"]
 
     view_rows = []
@@ -250,6 +255,7 @@ def _history_signature(entry: Dict[str, object]) -> str:
 
 
 def dedupe_history(entries: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    # Avoid duplicate optimization logs when rerunning or retrying the same round.
     seen: set[str] = set()
     deduped: List[Dict[str, object]] = []
     for entry in entries:
@@ -300,6 +306,7 @@ def train_all_models(
     early_stop_patience: int,
     pretrained: bool,
 ) -> None:
+    # Sequentially train each requested backbone using a shared hyperparameter set per round.
     for idx, model_name in enumerate(model_names, start=1):
         print(
             f"[RT][TRAIN] {idx}/{len(model_names)} model={model_name} "
@@ -388,6 +395,7 @@ def cleanup_old_artifacts(
 
 
 def parse_args() -> argparse.Namespace:
+    # CLI specialized for iterative terminal-only review and lightweight tuning loops.
     formatter = lambda prog: argparse.HelpFormatter(prog, width=120)
     parser = argparse.ArgumentParser(
         description="Tự review mô hình: in bảng phân tích trực tiếp ra terminal (không tạo ảnh)",
@@ -460,6 +468,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main_with_args(args: argparse.Namespace) -> None:
+    # Main loop: optional train -> evaluate models -> evaluate ensemble -> log history -> propose next params.
 
     data_root = discover_data_dir(args.data_dir)
     test_root = data_root / "test"
@@ -504,6 +513,7 @@ def main_with_args(args: argparse.Namespace) -> None:
         )
 
         if args.train_before_review:
+            # Train stage can be skipped when user only wants to review existing checkpoints.
             train_all_models(
                 model_names=model_names,
                 data_dir=data_root,
@@ -605,6 +615,7 @@ def main_with_args(args: argparse.Namespace) -> None:
         )
 
         if args.auto_cleanup:
+            # Keep only recent artifacts to control disk usage during long tuning sessions.
             cleanup_info = cleanup_old_artifacts(
                 models_dir=models_dir,
                 model_names=model_names,

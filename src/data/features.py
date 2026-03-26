@@ -17,9 +17,11 @@ VALID_EXTS = (".jpg", ".jpeg", ".png")
 
 
 def build_transforms(train: bool = True) -> T.Compose:
+    # Giữ các bước tiền xử lý ảnh nhất quán với chuẩn của các mô hình đã huấn luyện sẵn trên ImageNet.
     if train:
         return T.Compose(
             [
+                # Áp dụng các biến đổi hình học và màu sắc (xoay, cắt, chỉnh màu) để giúp mô hình học tốt hơn, tránh học vẹt trên tập dữ liệu nhỏ.
                 T.RandomResizedCrop(
                     (IMG_SIZE, IMG_SIZE),
                     scale=(0.72, 1.0),
@@ -58,6 +60,7 @@ def build_transforms(train: bool = True) -> T.Compose:
     else:
         return T.Compose(
             [
+                # Đường dẫn xử lý cho đánh giá (Eval) được giữ cố định (không ngẫu nhiên) để kết quả kiểm tra luôn giống nhau mỗi lần chạy.
                 T.Resize(int(IMG_SIZE * 1.15), interpolation=InterpolationMode.BICUBIC, antialias=True),
                 T.CenterCrop((IMG_SIZE, IMG_SIZE)),
                 T.ToTensor(),
@@ -109,12 +112,14 @@ class PillImageDataset(Dataset):
         transform: T.Compose | None = None,
         class_to_idx: Dict[str, int] | None = None,
     ) -> None:
+        # Cấu trúc thư mục mong đợi: thư_mục_gốc/<tên_lớp_thuốc>/*.jpg (hoặc png).
         self.root = root
         self.transform = transform or build_transforms(train=True)
         self.samples: List[ImageSample] = []
         self.class_to_idx = self._find_classes(class_to_idx=class_to_idx)
 
     def _find_classes(self, class_to_idx: Dict[str, int] | None = None) -> Dict[str, int]:
+        # Tự động tìm kiếm tên các lớp thuốc dựa trên tên thư mục nếu chưa được cung cấp bảng ánh xạ.
         if class_to_idx is None:
             classes: List[str] = []
             for d in os.scandir(self.root):
@@ -130,6 +135,7 @@ class PillImageDataset(Dataset):
             classes = sorted(classes)
             class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
 
+        # Tạo một danh sách phẳng chứa tất cả các ảnh mẫu để việc lấy dữ liệu (hàm __getitem__) nhanh và ổn định.
         for cls_name, cls_idx in class_to_idx.items():
             cls_dir = os.path.join(self.root, cls_name)
             if not os.path.isdir(cls_dir):
@@ -147,6 +153,7 @@ class PillImageDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, str]:
         sample = self.samples[idx]
         img = pil_loader(sample.path)
+        # Cắt lấy vùng trung tâm của ảnh, nơi viên thuốc thường xuất hiện, để mô hình tập trung vào đối tượng chính.
         img = focus_on_object(img, scale=0.85)
         img = self.transform(img)
         return img, sample.label, sample.path

@@ -18,6 +18,7 @@ LOGGER = logging.getLogger(__name__)
 ModelBuilder = Callable[[int, bool], Tuple[nn.Module, int]]
 
 
+# Danh sách đăng ký các kiến trúc mô hình được hỗ trợ.
 MODEL_BUILDERS: Dict[str, ModelBuilder] = {
     "resnet50": build_resnet50,
     "efficientnet_b0": build_efficientnet_b0,
@@ -31,6 +32,7 @@ def create_model(
     pretrained: bool = True,
     fallback_to_random: bool = False,
 ) -> Tuple[nn.Module, int]:
+    # Cổng duy nhất để tạo mô hình cho cả huấn luyện, đánh giá và suy luận, đảm bảo tính nhất quán.
     if model_name not in MODEL_BUILDERS:
         raise ValueError(f"Unsupported model: {model_name}")
 
@@ -39,6 +41,7 @@ def create_model(
         try:
             return builder(num_classes, True)
         except (OSError, ConnectionError, URLError) as exc:
+            # Cơ chế dự phòng offline: nếu không tải được pretrained weights, sẽ tự động chuyển sang khởi tạo ngẫu nhiên để không ngắt quãng quá trình.
             LOGGER.warning(
                 "Could not load pretrained weights for %s: %s",
                 model_name,
@@ -59,6 +62,7 @@ def load_checkpoint(
     checkpoint_path: str,
     map_location: str | torch.device | None = None,
 ) -> nn.Module:
+    # Hỗ trợ nạp cả 2 dạng file: chỉ chứa trọng số (state_dict) hoặc trọn bộ checkpoint (bao gồm cả optimizer, epoch...).
     state = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
     state_dict = state["model_state_dict"] if isinstance(state, dict) and "model_state_dict" in state else state
 
@@ -69,6 +73,7 @@ def load_checkpoint(
             resolved_num_classes = ckpt_num_classes
 
     if resolved_num_classes is None:
+        # Biện pháp cuối cùng: suy luận số lượng lớp (num_classes) dựa trên kích thước của lớp cuối cùng trong file trọng số.
         if model_name == "resnet50" and "fc.bias" in state_dict:
             resolved_num_classes = int(state_dict["fc.bias"].shape[0])
         elif model_name == "efficientnet_b0" and "classifier.1.bias" in state_dict:

@@ -21,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train pill classification models")
+    parser = argparse.ArgumentParser(description="Huấn luyện các mô hình phân loại thuốc")
     parser.add_argument("--data-dir", type=str, default="data_aligned", help="Root data directory")
     parser.add_argument("--model", type=str, default="resnet50",
                         choices=["resnet50", "efficientnet_b0", "vit_b_16"])
@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    # Windows thường dễ lỗi multiprocessing khi num_workers > 0 trong một số môi trường IDE.
+    # Windows thường gặp lỗi multiprocessing khi num_workers > 0 với một số IDE, nên mặc định set về 0.
     default_workers = 0 if os.name == "nt" else 2
     parser.add_argument("--num-workers", type=int, default=default_workers)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
@@ -40,25 +40,25 @@ def parse_args() -> argparse.Namespace:
         "--label-smoothing",
         type=float,
         default=0.1,
-        help="Label smoothing for CrossEntropyLoss",
+        help="Kỹ thuật làm mượt nhãn (Label Smoothing) giúp mô hình bớt tự tin thái quá, giảm overfitting.",
     )
     parser.add_argument(
         "--mixup-alpha",
         type=float,
         default=0.2,
-        help="Mixup alpha. Set 0 to disable mixup",
+        help="Hệ số Alpha cho Mixup. Đặt 0 để tắt. Mixup trộn 2 ảnh lại để tạo dữ liệu mới.",
     )
     parser.add_argument(
         "--pretrained",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use pretrained weights when available",
+        help="Sử dụng trọng số đã huấn luyện trước (pretrained) từ ImageNet nếu có.",
     )
     parser.add_argument(
         "--grad-clip-norm",
         type=float,
         default=1.0,
-        help="Clip gradient norm (<=0 to disable)",
+        help="Giới hạn độ lớn của gradient (Gradient Clipping) để tránh bùng nổ gradient khi huấn luyện (<=0 để tắt).",
     )
     parser.add_argument(
         "--seed",
@@ -70,19 +70,19 @@ def parse_args() -> argparse.Namespace:
         "--max-train-val-gap",
         type=float,
         default=0.18,
-        help="Early-stop guard: if train_acc - val_acc exceeds this repeatedly, stop to avoid curve divergence",
+        help="Cơ chế dừng sớm: nếu độ chính xác tập train cao hơn tập val quá nhiều (overfitting), sẽ dừng lại.",
     )
     parser.add_argument(
         "--freeze-backbone-epochs",
         type=int,
         default=0,
-        help="Freeze backbone for first N epochs to keep train/val curves more stable on very small datasets",
+        help="Đóng băng (không huấn luyện) phần backbone trong N epoch đầu để ổn định quá trình học trên tập dữ liệu nhỏ.",
     )
     parser.add_argument(
         "--validation-split",
         type=float,
         default=0.15,
-        help="If val set is too small, stratified holdout ratio sampled from train",
+        help="Nếu tập val quá nhỏ, sẽ tự động trích xuất thêm một phần từ tập train để làm tập val (theo tỷ lệ giữ nguyên phân bố lớp).",
     )
     parser.add_argument(
         "--min-val-samples",
@@ -94,7 +94,7 @@ def parse_args() -> argparse.Namespace:
         "--backbone-lr-scale",
         type=float,
         default=0.2,
-        help="Backbone lr multiplier compared to classifier head lr",
+        help="Hệ số nhân learning rate cho backbone (thường nhỏ hơn so với phần đầu phân loại để tránh quên kiến thức cũ).",
     )
     parser.add_argument(
         "--ema-decay",
@@ -142,6 +142,7 @@ def create_dataloaders(
     validation_split: float = 0.15,
     min_val_samples: int = 24,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    # Tạo 3 bộ nạp dữ liệu (DataLoader): train (có biến đổi ảnh), val (cố định), và train-metric (train không biến đổi để đo chỉ số).
     train_root = os.path.join(data_dir, "train")
     val_root = os.path.join(data_dir, "val")
 
@@ -159,7 +160,7 @@ def create_dataloaders(
 
     effective_batch_size = max(1, int(batch_size))
     if len(train_ds) < 8:
-        # For tiny datasets, prefer a smaller suggested batch and always clamp to dataset size.
+        # Với tập dữ liệu quá nhỏ, tự động giảm batch size để phù hợp.
         suggested = max(2, min(8, len(train_ds) // 2))
         effective_batch_size = min(effective_batch_size, suggested)
     effective_batch_size = min(effective_batch_size, max(1, len(train_ds)))
@@ -168,7 +169,7 @@ def create_dataloaders(
     train_eval_dataset_for_loader = train_eval_ds
     val_dataset_for_loader = val_ds
 
-    # If validation set is too small, create an additional stratified holdout from train.
+    # If validation is tiny, append a stratified holdout from train for stabler model selection.
     if len(val_ds) < max(1, int(min_val_samples)) and len(train_ds) > len(train_ds.class_to_idx):
         split = max(0.05, min(float(validation_split), 0.4))
         rng = np.random.default_rng(int(seed))
@@ -240,9 +241,11 @@ def _mixup_batch(
     alpha: float,
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+    # Nếu alpha <= 0 thì không dùng Mixup.
     if alpha <= 0:
         return images, labels, labels, 1.0
 
+    # Lấy ngẫu nhiên hệ số lambda từ phân phối Beta.
     lam = float(torch.distributions.Beta(alpha, alpha).sample().item())
     batch_size = images.size(0)
     index = torch.randperm(batch_size, device=device)
@@ -251,10 +254,12 @@ def _mixup_batch(
     labels_b = labels[index]
     return mixed_images, labels_a, labels_b, lam
 
-
 def _tta_logits(model: nn.Module, images: torch.Tensor, views: int = 1) -> torch.Tensor:
+    # Nếu số lần nhìn (views) <= 1 thì chỉ dự đoán 1 lần bình thường.
     if views <= 1:
         return model(images)
+
+    # Thêm các phiên bản ảnh lật/xoay để dự đoán (Test Time Augmentation).
 
     logits_list: List[torch.Tensor] = [model(images)]
     if views >= 2:
@@ -276,6 +281,7 @@ def evaluate(
     criterion: nn.Module,
     tta_views: int = 1,
 ) -> Tuple[float, float]:
+    # Hàm đánh giá chung cho cả tập train (metric) và tập val.
     model.eval()
     correct, total = 0, 0
     running_loss = 0.0
@@ -296,6 +302,7 @@ def evaluate(
 
 
 class ExponentialMovingAverage:
+    # Theo dõi phiên bản trung bình (smoothed) của tham số mô hình để giảm dao động khi đánh giá validation.
     def __init__(self, model: nn.Module, decay: float) -> None:
         self.decay = float(decay)
         self.shadow: Dict[str, torch.Tensor] = {
@@ -492,6 +499,7 @@ def train(args: argparse.Namespace | None = None) -> None:
     if args is None:
         args = parse_args()
 
+    # Full deterministic seed setup for reproducible curves.
     seed = int(getattr(args, "seed", 42))
     random.seed(seed)
     np.random.seed(seed)
@@ -501,7 +509,7 @@ def train(args: argparse.Namespace | None = None) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # Fallback khi chọn cuda nhưng không có GPU
+    # Graceful device fallback keeps CLI behavior predictable.
     if args.device == "cuda" and not torch.cuda.is_available():
         print("[WARN] CUDA không khả dụng, chuyển sang CPU.")
         args.device = "cpu"
@@ -522,7 +530,7 @@ def train(args: argparse.Namespace | None = None) -> None:
 
     class_to_idx = _resolve_class_to_idx(train_loader.dataset)
     num_classes = len(class_to_idx)
-    # Use uniform loss weights (disabled class weighting for better train/val gap visibility)
+    # Use uniform class weights to keep train/val gap diagnostics easier to interpret.
     class_weight_tensor = None
 
     model, _ = create_model(
@@ -538,6 +546,7 @@ def train(args: argparse.Namespace | None = None) -> None:
     n_train = len(train_loader.dataset)
     n_val = len(val_loader.dataset)
 
+    # Gap guard is tuned differently for tiny datasets where metrics are noisier.
     max_large_gap_epochs = 2
     gap_guard_start_epoch = 3
     if n_train <= 64:
@@ -580,6 +589,7 @@ def train(args: argparse.Namespace | None = None) -> None:
         pg["initial_lr"] = float(pg["lr"])
     base_lr = float(args.lr)
     warmup_epochs = 2
+    # Warmup + cosine decay often stabilizes fine-tuning with pretrained backbones.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=max(2, int(args.epochs) - warmup_epochs),
@@ -762,6 +772,7 @@ def train(args: argparse.Namespace | None = None) -> None:
                 )
 
         saved_this_epoch = False
+        # Save only meaningful improvements to avoid churn from tiny metric fluctuations.
         if val_acc > best_acc + 1e-4:
             best_acc = val_acc
             best_epoch = epoch

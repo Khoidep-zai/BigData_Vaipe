@@ -16,7 +16,7 @@ from ..models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate trained models and export report charts")
+    parser = argparse.ArgumentParser(description="Đánh giá hiệu năng các mô hình đã huấn luyện và xuất biểu đồ so sánh.")
     parser.add_argument("--data-dir", type=str, default="data_aligned", help="Data root with test split")
     parser.add_argument("--models-dir", type=str, default="models", help="Directory of .pt checkpoints")
     parser.add_argument(
@@ -38,6 +38,7 @@ def _evaluate_one_model(
     dataset_class_to_idx: Dict[str, int],
     device: torch.device,
 ) -> Dict[str, float]:
+    # Ưu tiên lấy bảng ánh xạ lớp (class_to_idx) từ checkpoint để tránh lệch nhãn khi dự đoán.
     ckpt_class_to_idx = load_checkpoint_class_to_idx(str(checkpoint_path), map_location=device)
     num_classes = len(ckpt_class_to_idx) if ckpt_class_to_idx else len(dataset_class_to_idx)
 
@@ -58,6 +59,7 @@ def _evaluate_one_model(
     y_true_names: List[str] = []
     y_pred_names: List[str] = []
 
+    # Dùng tên lớp (string) thay vì chỉ số (int) để tính toán, giúp kết quả chính xác ngay cả khi thứ tự lớp trong các mô hình khác nhau.
     with torch.no_grad():
         for images, labels, _paths in loader:
             images = images.to(device)
@@ -94,6 +96,7 @@ def _plot_comparison(rows: List[Dict[str, float]], chart_path: Path) -> None:
     accs = [float(r["accuracy"]) for r in rows]
     f1s = [float(r["macro_f1"]) for r in rows]
 
+    # Vẽ biểu đồ cột so sánh Accuracy và F1-Score giữa các mô hình để dễ dàng chọn ra mô hình tốt nhất.
     plt.style.use("ggplot")
     fig, ax = plt.subplots(figsize=(10, 5))
 

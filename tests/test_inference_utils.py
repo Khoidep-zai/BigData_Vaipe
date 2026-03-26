@@ -8,12 +8,14 @@ from src.inference.inference import _compare_colors, _compare_size, _compare_tex
 
 
 def _create_image(path: Path, color=(128, 128, 128), size=(100, 50)):
+    # Hàm hỗ trợ tạo ảnh mẫu cố định (deterministic) trên ổ đĩa để phục vụ kiểm thử.
     img = Image.new("RGB", size, color=color)
     img.save(path)
     return img
 
 
 def test_color_size_texture_scores(tmp_path: Path):
+    # Đảm bảo các hàm tính điểm (màu sắc, kích thước, vân bề mặt) luôn trả về giá trị chuẩn hóa trong khoảng [0, 1].
     img1_path = tmp_path / "a.jpg"
     img2_path = tmp_path / "b.jpg"
     img1 = _create_image(img1_path, color=(120, 120, 120))

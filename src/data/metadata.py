@@ -14,6 +14,7 @@ def _strip_accents(text: str) -> str:
 
 def normalize_text(text: str) -> str:
     """Normalize medicine text to improve robust matching between folder names and CSV fields."""
+    # Việc chuẩn hóa này giúp các tên lớp như 'cefadroxil_500mg_0.5g' có thể khớp được với dòng tương ứng trong file CSV.
     txt = _strip_accents((text or "").lower())
     txt = txt.replace("_", " ").replace("-", " ")
     txt = txt.replace(",", ".")
@@ -47,6 +48,7 @@ class MedicineMetadataIndex:
         self.records = records
         self._tokens_by_idx: List[Set[str]] = []
         for r in records:
+            # Sử dụng kết hợp tên thuốc + thành phần + bệnh điều trị để tăng khả năng tìm kiếm khớp theo ngữ nghĩa rộng hơn.
             token_text = " ".join([r.medicine_name, r.composition, r.disease_vi])
             self._tokens_by_idx.append(_tokenize(token_text))
 
@@ -79,12 +81,13 @@ class MedicineMetadataIndex:
         if not self.records:
             return None
 
+        # Tìm dòng thông tin thuốc phù hợp nhất cho tên lớp/thư mục dựa trên điểm số trùng lặp từ khóa.
         query_tokens = _tokenize(class_name)
         if not query_tokens:
             return None
 
-        best_idx = -1
         best_score = 0.0
+        best_idx = -1
 
         for idx, tokens in enumerate(self._tokens_by_idx):
             if not tokens:
@@ -93,7 +96,7 @@ class MedicineMetadataIndex:
             if inter == 0:
                 continue
 
-            # Dice-like score, robust when class name has fewer tokens than CSV row.
+            # So khop kieu Dice: giup ket qua on dinh ke ca khi ten lop ngan hon nhieu so voi mo ta day du trong CSV.
             score = (2.0 * inter) / (len(query_tokens) + len(tokens))
             if score > best_score:
                 best_score = score

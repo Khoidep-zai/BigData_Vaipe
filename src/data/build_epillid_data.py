@@ -127,11 +127,11 @@ def build_thuoc_data_from_epillid(
     """Xây dữ liệu THUOC từ ePillID."""
     all_df, val_df, test_df = load_epillid_splits(epillid_root)
 
-    # Xác định train = all - val - test
+    # Tạo lại tập huấn luyện (train) bằng cách lấy tập 'all' trừ đi các ảnh đã nằm trong tập val và test.
     used_paths = pd.concat([val_df["image_path"], test_df["image_path"]])
     train_df = all_df[~all_df["image_path"].isin(used_paths)].copy()
 
-    # Xóa dữ liệu cũ
+    # Tạo lại cây thư mục đầu ra từ đầu để tránh bị lẫn các file cũ từ lần chạy trước.
     if output_root.exists():
         shutil.rmtree(output_root)
     (output_root / "train").mkdir(parents=True, exist_ok=True)
@@ -148,6 +148,7 @@ def build_thuoc_data_from_epillid(
 
     def _copy_split(split_name: str, df: pd.DataFrame) -> None:
         nonlocal metadata_rows
+        # Duyệt qua từng dòng dữ liệu và tạo ra các file ảnh thực tế theo cấu trúc 'mỗi lớp một thư mục'.
         for _, row in tqdm(df.iterrows(), total=len(df), desc=f"Copy {split_name}"):
             cls = _build_class_name(row, label_mode=label_mode, label_col=label_col)
             src_path = _resolve_img_path(img_root, row["image_path"])
@@ -179,10 +180,11 @@ def build_thuoc_data_from_epillid(
     _copy_split("test", test_df)
 
     if metadata_rows:
+        # Lưu lại thông tin nguồn gốc để có thể tra cứu xem mỗi ảnh xuất ra đến từ đâu.
         meta_df = pd.DataFrame(metadata_rows)
         meta_df.to_csv(output_root / "pill_metadata.csv", index=False)
 
-    # Build class_to_idx sorted by class names for reproducibility.
+    # Sắp xếp tên lớp theo thứ tự cố định để tránh việc chỉ số (index) của lớp bị thay đổi ngẫu nhiên giữa các lần chạy.
     classes = sorted(class_counts.keys())
     class_to_idx = {name: idx for idx, name in enumerate(classes)}
     with (output_root / "class_to_idx.json").open("w", encoding="utf-8") as f:

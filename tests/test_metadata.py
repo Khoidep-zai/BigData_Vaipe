@@ -4,6 +4,7 @@ from src.data.metadata import MedicineMetadataIndex
 
 
 def test_metadata_best_match_from_class_name(tmp_path: Path):
+    # Đảm bảo rằng việc tách từ khoá từ tên lớp (tên thư mục) có thể giúp tìm đúng dòng dữ liệu thuốc tương ứng trong file CSV.
     csv_path = tmp_path / "medicine.csv"
     csv_path.write_text(
         "Medicine Name,Composition,Dosage_Form,Weight,Color_For_AI,Shape_For_AI,Active_Ingredient_Group,Disease_Treated_VI\n"
@@ -20,5 +21,6 @@ def test_metadata_best_match_from_class_name(tmp_path: Path):
 
 
 def test_metadata_to_dict_empty_when_none():
+    # Kiểm tra phòng thủ: nếu bản ghi là None thì phải trả về dict rỗng chứ không gây lỗi.
     index = MedicineMetadataIndex([])
     assert index.to_dict(None) == {}

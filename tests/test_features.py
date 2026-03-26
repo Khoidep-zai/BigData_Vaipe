@@ -6,6 +6,7 @@ from src.data.features import build_transforms, compute_image_statistics, focus_
 
 
 def test_build_transforms_train_and_eval():
+    # Kiểm tra tính hợp lệ: đảm bảo cả 2 quy trình biến đổi ảnh (train và eval) đều khởi tạo thành công.
     t_train = build_transforms(train=True)
     t_eval = build_transforms(train=False)
     assert t_train is not None
@@ -13,6 +14,7 @@ def test_build_transforms_train_and_eval():
 
 
 def test_compute_image_statistics_shape(tmp_path: Path):
+    # Tạo ảnh giả lập để kiểm tra xem hàm tính thống kê có trả về đúng các trường dữ liệu cần thiết không.
     img_path = tmp_path / "test.jpg"
     img = Image.new("RGB", (100, 50), color=(128, 64, 32))
     img.save(img_path)
@@ -27,6 +29,7 @@ def test_compute_image_statistics_shape(tmp_path: Path):
 
 
 def test_focus_on_object_center_crop():
+    # Kiểm tra hàm cắt ảnh: đảm bảo cắt đúng vùng trung tâm theo tỷ lệ cạnh ngắn nhất.
     img = Image.new("RGB", (200, 100), color=(128, 64, 32))
     cropped = focus_on_object(img, scale=0.5)
     # cạnh ngắn = 100 -> sau crop còn 50

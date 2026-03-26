@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from optimal_configs import OPTIMAL_CONFIGS
+from Review.optimal_configs import OPTIMAL_CONFIGS
 
 
 def _class_dirs(root: Path) -> set[str]:
@@ -39,6 +39,7 @@ def _class_dirs(root: Path) -> set[str]:
 
 
 def _has_consistent_splits(data_dir: Path) -> bool:
+    # Đảm bảo rằng thư mục train, val và test đều có cùng danh sách các lớp (thư mục con) thuốc giống nhau trước khi bắt đầu huấn luyện.
     train_classes = _class_dirs(data_dir / "train")
     val_classes = _class_dirs(data_dir / "val")
     test_classes = _class_dirs(data_dir / "test")
@@ -75,7 +76,7 @@ def train_models(
     tta_views: int = 3,
     output_dir: str = "models",
 ) -> bool:
-    """Train Models"""
+    """Huấn luyện các mô hình được chọn, sử dụng bộ tham số tối ưu riêng cho từng loại kiến trúc (backbone)."""
     if models is None:
         models = ["resnet50", "efficientnet_b0", "vit_b_16"]
     
@@ -93,6 +94,7 @@ def train_models(
         model_ema_decay = float(config.get("ema_decay", ema_decay))
         model_tta_views = int(config.get("tta_views", tta_views))
         
+        # Gọi lệnh chạy thực tế qua file train_cli.py ở chế độ đơn lẻ (single) để huấn luyện.
         cmd = [
             sys.executable,
             "train_cli.py",
@@ -152,12 +154,13 @@ def evaluate_models(
     device: str = "cuda",
     output_dir: str = "models",
 ) -> bool:
-    """Evaluate & Generate Reports"""
+    """Đánh giá các mô hình đã lưu (checkpoint) và xuất ra các file báo cáo, biểu đồ so sánh."""
     if models is None:
         models = ["resnet50", "efficientnet_b0", "vit_b_16"]
     
     model_list_str = ",".join(models)
     
+    # Tái sử dụng module đánh giá có sẵn để giữ cho logic code tập trung ở một nơi.
     cmd = [
         sys.executable,
         "-m",

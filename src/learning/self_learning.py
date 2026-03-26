@@ -27,6 +27,7 @@ DEFAULT_FEEDBACK_PATH = Path(__file__).resolve().parents[1] / "data" / "feedback
 
 @dataclass
 class FeedbackRecord:
+    # Cấu trúc bản ghi tối giản mô tả một lần người dùng kiểm tra kết quả.
     sample_image_path: str  # ảnh mẫu ban đầu
     query_image_path: str  # ảnh người dùng muốn kiểm tra
     predicted_class: str
@@ -50,6 +51,7 @@ def log_feedback(
     - Không chặn luồng chính của GUI (ghi rất nhẹ).
     """
     path = log_path or DEFAULT_FEEDBACK_PATH
+    # Dùng định dạng JSONL (mỗi dòng 1 JSON) giúp việc ghi thêm dữ liệu dễ dàng và ít lỗi hơn so với JSON thường.
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         json.dump(asdict(record), f, ensure_ascii=False)
@@ -72,7 +74,7 @@ def load_feedback(log_path: Path | None = None) -> List[FeedbackRecord]:
                 data = json.loads(line)
                 records.append(FeedbackRecord(**data))
             except Exception:
-                # Bỏ qua dòng hỏng để không làm gãy cả file
+                # Skip malformed lines so one bad row does not break full feedback loading.
                 continue
     return records
 
