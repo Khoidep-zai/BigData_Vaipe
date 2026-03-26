@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import csv
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -173,4 +175,100 @@ def compute_image_statistics(img: Image.Image) -> dict:
         "width": int(w),
         "aspect_ratio": float(w / h),
     }
+
+
+def image_to_numeric_vector(img: Image.Image, thumbnail_size: int = 16) -> np.ndarray:
+    """
+    Chuyen anh thanh vector so de phuc vu phan tich/thuc nghiem.
+
+    Vector gom:
+    - 8 gia tri thong ke (mean/std RGB, texture std, aspect ratio)
+    - Anh grayscale thumbnail duoc flatten (thumbnail_size * thumbnail_size)
+    """
+    img_focused = focus_on_object(img, scale=0.85)
+    rgb_arr = np.array(img_focused.convert("RGB"), dtype=np.float32) / 255.0
+    gray_arr = np.array(img_focused.convert("L"), dtype=np.float32) / 255.0
+
+    mean_rgb = rgb_arr.mean(axis=(0, 1))
+    std_rgb = rgb_arr.std(axis=(0, 1))
+    h, w = gray_arr.shape
+    texture_std = float(gray_arr.std())
+    aspect_ratio = float(w / max(h, 1))
+
+    thumb = img_focused.convert("L").resize(
+        (thumbnail_size, thumbnail_size),
+        resample=Image.BILINEAR,
+    )
+    thumb_flat = (np.array(thumb, dtype=np.float32) / 255.0).reshape(-1)
+
+    stats = np.array(
+        [
+            float(mean_rgb[0]),
+            float(mean_rgb[1]),
+            float(mean_rgb[2]),
+            float(std_rgb[0]),
+            float(std_rgb[1]),
+            float(std_rgb[2]),
+            texture_std,
+            aspect_ratio,
+        ],
+        dtype=np.float32,
+    )
+    return np.concatenate([stats, thumb_flat], axis=0).astype(np.float32)
+
+
+def image_vector_feature_names(thumbnail_size: int = 16) -> List[str]:
+    names = [
+        "mean_r",
+        "mean_g",
+        "mean_b",
+        "std_r",
+        "std_g",
+        "std_b",
+        "texture_std",
+        "aspect_ratio",
+    ]
+    names.extend([f"px_{i:03d}" for i in range(thumbnail_size * thumbnail_size)])
+    return names
+
+
+def export_image_vectors_csv(
+    split_root: str | Path,
+    output_csv: str | Path,
+    thumbnail_size: int = 16,
+) -> None:
+    """
+    Quet du lieu theo cau truc split/class/*.jpg va xuat CSV vector hoa.
+    Ham nay khong can thay doi pipeline train hien tai, chi bo sung du lieu so hoa de phan tich.
+    """
+    split_root = Path(split_root)
+    output_csv = Path(output_csv)
+    rows: List[Dict[str, object]] = []
+    feature_names = image_vector_feature_names(thumbnail_size=thumbnail_size)
+
+    classes = [d.name for d in split_root.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    classes = sorted(classes)
+
+    for cls_name in classes:
+        cls_dir = split_root / cls_name
+        for fname in sorted(os.listdir(cls_dir)):
+            if not fname.lower().endswith(VALID_EXTS):
+                continue
+            img_path = cls_dir / fname
+            vec = image_to_numeric_vector(pil_loader(str(img_path)), thumbnail_size=thumbnail_size)
+
+            row: Dict[str, object] = {
+                "class_name": cls_name,
+                "image_path": str(img_path),
+            }
+            for col, val in zip(feature_names, vec.tolist()):
+                row[col] = float(val)
+            rows.append(row)
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    with output_csv.open("w", encoding="utf-8", newline="") as f:
+        fieldnames = ["class_name", "image_path"] + feature_names
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 

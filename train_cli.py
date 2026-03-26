@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 
+from src.data.data_setup import discover_or_prepare_data_dir, prepare_metadata_artifacts
 from src.orchestration.pipeline import run_pipeline
 from src.training.train import train as train_one_model
-import review_terminal as review_module
+from Review import review_terminal as review_module
 
 
 def main() -> None:
@@ -46,6 +47,14 @@ def main() -> None:
     parser.add_argument("--backbone-lr-scale", type=float, default=0.2)
     parser.add_argument("--ema-decay", type=float, default=0.997)
     parser.add_argument("--tta-views", type=int, default=3)
+    parser.add_argument("--train-metric-every", type=int, default=3)
+    parser.add_argument("--quick-val-tta-views", type=int, default=1)
+    parser.add_argument(
+        "--full-tta-on-save",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--deterministic", action="store_true", default=False)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument(
         "--device",
@@ -62,8 +71,48 @@ def main() -> None:
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--keep-report-dirs", type=int, default=3)
     parser.add_argument("--cleanup-dry-run", action="store_true", default=False)
+    parser.add_argument(
+        "--fast-train",
+        action="store_true",
+        default=False,
+        help="Reduce training compute (fewer epochs, no EMA, no val-TTA) to iterate faster.",
+    )
+    parser.add_argument(
+        "--skip-metadata-artifacts",
+        action="store_true",
+        default=False,
+        help="Skip metadata clean/vector export step before training.",
+    )
 
     args, _ = parser.parse_known_args()
+
+    try:
+        args.data_dir = discover_or_prepare_data_dir(preferred=args.data_dir, seed=int(args.seed))
+    except Exception as exc:
+        raise SystemExit(f"[ERROR] Khong the chuan bi du lieu train: {exc}")
+
+    if not args.skip_metadata_artifacts:
+        metadata_artifacts = prepare_metadata_artifacts(data_root="data")
+        if metadata_artifacts:
+            clean_csv = metadata_artifacts["clean_summary"]["output_csv"]
+            vector_csv = metadata_artifacts["vector_csv"]
+            print(f"[META] Clean metadata CSV: {clean_csv}")
+            print(f"[META] Metadata vector CSV: {vector_csv}")
+
+    if args.fast_train:
+        args.epochs = max(6, int(round(float(args.epochs) * 0.45)))
+        args.tta_views = 1
+        args.ema_decay = 0.0
+        args.train_metric_every = max(int(args.train_metric_every), 4)
+        args.quick_val_tta_views = 1
+        args.full_tta_on_save = True
+        args.early_stop_patience = min(int(args.early_stop_patience), 4)
+        args.freeze_backbone_epochs = min(int(args.freeze_backbone_epochs), 1)
+        print(
+            "[FAST] Enabled: "
+            f"epochs={args.epochs}, tta_views={args.tta_views}, ema_decay={args.ema_decay}, "
+            f"train_metric_every={args.train_metric_every}, patience={args.early_stop_patience}"
+        )
 
     if args.mode == "all":
         # Chuyển toàn bộ tham số dòng lệnh sang tầng điều phối (orchestration) để thực hiện: huấn luyện + đánh giá + báo cáo.
@@ -79,6 +128,10 @@ def main() -> None:
             backbone_lr_scale=args.backbone_lr_scale,
             ema_decay=args.ema_decay,
             tta_views=args.tta_views,
+            train_metric_every=args.train_metric_every,
+            quick_val_tta_views=args.quick_val_tta_views,
+            full_tta_on_save=args.full_tta_on_save,
+            deterministic=args.deterministic,
             num_workers=args.num_workers,
             device=args.device,
             early_stop_patience=args.early_stop_patience,
@@ -109,6 +162,10 @@ def main() -> None:
             backbone_lr_scale=args.backbone_lr_scale,
             ema_decay=args.ema_decay,
             tta_views=args.tta_views,
+            train_metric_every=args.train_metric_every,
+            quick_val_tta_views=args.quick_val_tta_views,
+            full_tta_on_save=args.full_tta_on_save,
+            deterministic=args.deterministic,
             early_stop_patience=args.early_stop_patience,
             max_train_val_gap=args.max_train_val_gap,
             seed=args.seed,
@@ -126,7 +183,7 @@ def main() -> None:
 
     # Chế độ single: lệnh chạy nhanh để huấn luyện duy nhất một loại mô hình (backbone).
     train_args = argparse.Namespace(
-        data_dir=args.data_dir or "data_aligned",
+        data_dir=args.data_dir,
         model=args.model,
         epochs=args.epochs,
         batch_size=args.batch_size,
@@ -137,6 +194,10 @@ def main() -> None:
         backbone_lr_scale=args.backbone_lr_scale,
         ema_decay=args.ema_decay,
         tta_views=args.tta_views,
+        train_metric_every=args.train_metric_every,
+        quick_val_tta_views=args.quick_val_tta_views,
+        full_tta_on_save=args.full_tta_on_save,
+        deterministic=args.deterministic,
         num_workers=args.num_workers,
         device=args.device,
         output_dir=args.output_dir,

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from Review.optimal_configs import OPTIMAL_CONFIGS
+from src.data.data_setup import discover_or_prepare_data_dir, prepare_metadata_artifacts
 
 
 def _class_dirs(root: Path) -> set[str]:
@@ -75,6 +76,8 @@ def train_models(
     ema_decay: float = 0.997,
     tta_views: int = 3,
     output_dir: str = "models",
+    num_workers: int = 0,
+    fast_train: bool = False,
 ) -> bool:
     """Huấn luyện các mô hình được chọn, sử dụng bộ tham số tối ưu riêng cho từng loại kiến trúc (backbone)."""
     if models is None:
@@ -93,6 +96,18 @@ def train_models(
         model_backbone_lr_scale = float(config.get("backbone_lr_scale", backbone_lr_scale))
         model_ema_decay = float(config.get("ema_decay", ema_decay))
         model_tta_views = int(config.get("tta_views", tta_views))
+        model_epochs = int(config.get("epochs", 25))
+        model_patience = int(config.get("early_stop_patience", 6))
+        model_train_metric_every = 3
+        model_quick_val_tta_views = 1
+
+        if fast_train:
+            model_epochs = max(6, int(round(model_epochs * 0.45)))
+            model_tta_views = 1
+            model_ema_decay = 0.0
+            model_patience = min(model_patience, 4)
+            model_freeze_epochs = min(model_freeze_epochs, 1)
+            model_train_metric_every = 4
         
         # Gọi lệnh chạy thực tế qua file train_cli.py ở chế độ đơn lẻ (single) để huấn luyện.
         cmd = [
@@ -105,7 +120,7 @@ def train_models(
             "--data-dir",
             data_dir,
             "--epochs",
-            str(config.get("epochs", 25)),
+            str(model_epochs),
             "--batch-size",
             str(batch_size),
             "--lr",
@@ -117,9 +132,9 @@ def train_models(
             "--mixup-alpha",
             str(config["mixup_alpha"]),
             "--early-stop-patience",
-            str(config.get("early_stop_patience", 6)),
+            str(model_patience),
             "--num-workers",
-            "0",  # Windows/Colab friendly
+            str(max(0, int(num_workers))),
             "--seed",
             str(seed),
             "--max-train-val-gap",
@@ -132,6 +147,12 @@ def train_models(
             str(model_ema_decay),
             "--tta-views",
             str(model_tta_views),
+            "--train-metric-every",
+            str(model_train_metric_every),
+            "--quick-val-tta-views",
+            str(model_quick_val_tta_views),
+            "--full-tta-on-save",
+            "--skip-metadata-artifacts",
             "--device",
             device,
             "--output-dir",
@@ -433,6 +454,12 @@ Examples:
         help="Batch size (default: 16)",
     )
     parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="DataLoader workers (default: 0 on Windows for stability)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -466,18 +493,34 @@ Examples:
         action="store_true",
         help="Skip evaluation after training",
     )
+    parser.add_argument(
+        "--fast-train",
+        action="store_true",
+        help="Use faster training preset (fewer epochs, no EMA, no val-TTA).",
+    )
+    parser.add_argument(
+        "--skip-metadata-artifacts",
+        action="store_true",
+        help="Skip metadata clean/vector export at startup.",
+    )
     
     args = parser.parse_args()
 
-    # Validate data dir
+    try:
+        args.data_dir = discover_or_prepare_data_dir(preferred=args.data_dir, seed=int(args.seed))
+    except Exception as exc:
+        print(f"[ERROR] Khong the chuan bi du lieu train: {exc}")
+        sys.exit(1)
+
+    if not args.skip_metadata_artifacts:
+        metadata_artifacts = prepare_metadata_artifacts(data_root="data")
+        if metadata_artifacts:
+            clean_csv = metadata_artifacts["clean_summary"]["output_csv"]
+            vector_csv = metadata_artifacts["vector_csv"]
+            print(f"[META] Clean metadata CSV: {clean_csv}")
+            print(f"[META] Metadata vector CSV: {vector_csv}")
+
     data_dir = Path(args.data_dir)
-    if not data_dir.exists():
-        print(f"[ERROR] Data directory not found: {args.data_dir}")
-        sys.exit(1)
-    
-    if not (data_dir / "train").exists():
-        print(f"[ERROR] Missing train folder in {args.data_dir}")
-        sys.exit(1)
 
     if not _has_consistent_splits(data_dir):
         fallback_dir = Path("data_aligned")
@@ -504,15 +547,17 @@ Examples:
     print(f"Data:         {args.data_dir}")
     print(f"Device:       {args.device}")
     print(f"Batch Size:   {args.batch_size}")
+    print(f"Workers:      {args.num_workers}")
     print(f"Seed:         {args.seed}")
     print(f"Max Gap:      {args.max_train_val_gap}")
     print(f"Freeze BB:    {args.freeze_backbone_epochs}")
     print(f"Output:       {args.output_dir}")
+    print(f"Fast Train:   {args.fast_train}")
     
     # Train
     if not args.compare_only:
         success = train_models(
-            data_dir=str(args.data_dir),
+            data_dir=str(data_dir),
             models=models,
             device=args.device,
             batch_size=args.batch_size,
@@ -520,6 +565,8 @@ Examples:
             max_train_val_gap=args.max_train_val_gap,
             freeze_backbone_epochs=args.freeze_backbone_epochs,
             output_dir=args.output_dir,
+            num_workers=args.num_workers,
+            fast_train=args.fast_train,
         )
         
         if not success:
@@ -528,7 +575,7 @@ Examples:
     # Evaluate
     if not args.skip_eval:
         evaluate_models(
-            data_dir=str(args.data_dir),
+            data_dir=str(data_dir),
             models=models,
             device=args.device,
             output_dir=args.output_dir,

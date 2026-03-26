@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from torch.utils.data import DataLoader
 
+from ..data.data_setup import discover_or_prepare_data_dir
 from ..data.features import PillImageDataset, build_transforms
 from ..models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
 from ..training.train import train as train_one_model
@@ -68,25 +69,8 @@ def _count_train_classes(root: Path) -> int:
     return len([d for d in train_root.iterdir() if d.is_dir() and not d.name.startswith(".")])
 
 
-def discover_data_dir(preferred: Optional[str] = None) -> str:
-    if preferred:
-        root = Path(preferred)
-        if not _is_valid_dataset_root(root):
-            raise FileNotFoundError(
-                f"Thư mục dữ liệu không hợp lệ: {root}. Cần có đủ các thư mục con train, val, test."
-            )
-        return str(root)
-
-    candidates = [Path("data_aligned"), Path("data")]
-    valid = [c for c in candidates if _is_valid_dataset_root(c)]
-    if not valid:
-        raise FileNotFoundError(
-            "Không tìm thấy thư mục dữ liệu hợp lệ. Vui lòng cung cấp --data-dir với train/val/test."
-        )
-
-    # Ưu tiên chọn thư mục dữ liệu nào có nhiều lớp trong folder train hơn (nếu tìm thấy nhiều ứng viên).
-    valid.sort(key=_count_train_classes, reverse=True)
-    return str(valid[0])
+def discover_data_dir(preferred: Optional[str] = None, seed: int = 42) -> str:
+    return discover_or_prepare_data_dir(preferred=preferred, seed=int(seed))
 
 
 def _build_loader(test_root: Path, batch_size: int, num_workers: int) -> Tuple[PillImageDataset, DataLoader]:
@@ -408,7 +392,7 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
 
     # Stage 1: discover input/output templates.
     _stage(1, total_stages, "Phat hien du lieu va tao thu muc dau ra")
-    data_dir = discover_data_dir(args.data_dir)
+    data_dir = discover_data_dir(args.data_dir, seed=int(getattr(args, "seed", 42)))
     test_dir = str(Path(data_dir) / "test")
     models_dir = Path(args.output_dir)
     report_dir = Path(args.report_dir)
@@ -437,6 +421,10 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
             backbone_lr_scale=float(getattr(args, "backbone_lr_scale", 0.2)),
             ema_decay=float(getattr(args, "ema_decay", 0.997)),
             tta_views=int(getattr(args, "tta_views", 3)),
+            train_metric_every=int(getattr(args, "train_metric_every", 3)),
+            quick_val_tta_views=int(getattr(args, "quick_val_tta_views", 1)),
+            full_tta_on_save=bool(getattr(args, "full_tta_on_save", True)),
+            deterministic=bool(getattr(args, "deterministic", False)),
             num_workers=args.num_workers,
             device=device_name,
             output_dir=str(models_dir),

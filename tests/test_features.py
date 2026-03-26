@@ -1,8 +1,15 @@
 from pathlib import Path
 
 from PIL import Image
+import numpy as np
 
-from src.data.features import build_transforms, compute_image_statistics, focus_on_object
+from src.data.features import (
+    build_transforms,
+    compute_image_statistics,
+    focus_on_object,
+    image_to_numeric_vector,
+    image_vector_feature_names,
+)
 
 
 def test_build_transforms_train_and_eval():
@@ -34,3 +41,14 @@ def test_focus_on_object_center_crop():
     cropped = focus_on_object(img, scale=0.5)
     # cạnh ngắn = 100 -> sau crop còn 50
     assert cropped.size[0] == 50 or cropped.size[1] == 50
+
+
+def test_image_to_numeric_vector_shape_and_values():
+    img = Image.new("RGB", (64, 64), color=(100, 150, 200))
+    vec = image_to_numeric_vector(img, thumbnail_size=8)
+    names = image_vector_feature_names(thumbnail_size=8)
+
+    assert isinstance(vec, np.ndarray)
+    assert vec.dtype == np.float32
+    assert vec.shape[0] == len(names)
+    assert np.isfinite(vec).all()

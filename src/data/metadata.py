@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -27,6 +28,22 @@ def _tokenize(text: str) -> Set[str]:
     norm = normalize_text(text)
     tokens = {tok for tok in norm.split(" ") if tok}
     return tokens
+
+
+def _hash_token_to_bucket(token: str, dim: int) -> int:
+    digest = hashlib.sha1(token.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % dim
+
+
+def text_to_hashed_vector(text: str, dim: int = 32) -> List[float]:
+    """Chuyen chuoi text thanh vector so co kich thuoc co dinh bang hashing-trick."""
+    vec = [0.0] * dim
+    for tok in _tokenize(text):
+        vec[_hash_token_to_bucket(tok, dim)] += 1.0
+    norm = sum(v * v for v in vec) ** 0.5
+    if norm > 0:
+        vec = [v / norm for v in vec]
+    return vec
 
 
 @dataclass(frozen=True)
@@ -124,3 +141,65 @@ class MedicineMetadataIndex:
             "active_group": record.active_group,
             "disease_vi": record.disease_vi,
         }
+
+    def to_numeric_vector(
+        self,
+        record: Optional[MedicineMetadataRecord],
+        text_dim: int = 32,
+    ) -> Dict[str, float]:
+        """
+        So hoa metadata thanh vector so de dung cho phan tich/feature fusion.
+        Khong thay doi model hien tai, chi cung cap du lieu vector bo sung.
+        """
+        if record is None:
+            return {f"meta_{i:03d}": 0.0 for i in range(text_dim * 3)}
+
+        name_vec = text_to_hashed_vector(record.medicine_name, dim=text_dim)
+        comp_vec = text_to_hashed_vector(record.composition, dim=text_dim)
+        disease_vec = text_to_hashed_vector(record.disease_vi, dim=text_dim)
+
+        out: Dict[str, float] = {}
+        offset = 0
+        for chunk in [name_vec, comp_vec, disease_vec]:
+            for i, v in enumerate(chunk):
+                out[f"meta_{offset + i:03d}"] = float(v)
+            offset += text_dim
+        return out
+
+
+def export_metadata_vectors_csv(
+    input_csv: str | Path,
+    output_csv: str | Path,
+    text_dim: int = 32,
+) -> None:
+    """Doc metadata CSV va xuat ban so hoa (vector) de cac pipeline phan tich co the tai su dung."""
+    index = MedicineMetadataIndex.from_csv(input_csv)
+    output_csv = Path(output_csv)
+    rows: List[Dict[str, object]] = []
+
+    for rec in index.records:
+        base = {
+            "medicine_name": rec.medicine_name,
+            "composition": rec.composition,
+            "dosage_form": rec.dosage_form,
+            "weight": rec.weight,
+            "color": rec.color,
+            "shape": rec.shape,
+            "active_group": rec.active_group,
+            "disease_vi": rec.disease_vi,
+        }
+        base.update(index.to_numeric_vector(rec, text_dim=text_dim))
+        rows.append(base)
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        with output_csv.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["medicine_name"])
+        return
+
+    fieldnames = list(rows[0].keys())
+    with output_csv.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)

@@ -108,6 +108,30 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="Number of TTA views used for validation evaluation",
     )
+    parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        default=False,
+        help="Enable deterministic CUDA behavior (slower but reproducible).",
+    )
+    parser.add_argument(
+        "--train-metric-every",
+        type=int,
+        default=3,
+        help="Compute exact train metric every N epochs; other epochs use fast approximation.",
+    )
+    parser.add_argument(
+        "--quick-val-tta-views",
+        type=int,
+        default=1,
+        help="Use lightweight TTA views for per-epoch validation; full TTA can run only on save candidates.",
+    )
+    parser.add_argument(
+        "--full-tta-on-save",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="When quick validation improves, re-evaluate candidate with full TTA before checkpointing.",
+    )
     return parser.parse_args()
 
 
@@ -217,6 +241,8 @@ def create_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         generator=shuffle_generator,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=(2 if num_workers > 0 else None),
     )
     train_metric_loader = DataLoader(
         train_eval_dataset_for_loader,
@@ -224,6 +250,8 @@ def create_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=(2 if num_workers > 0 else None),
     )
     val_loader = DataLoader(
         val_dataset_for_loader,
@@ -231,6 +259,8 @@ def create_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=(2 if num_workers > 0 else None),
     )
     return train_loader, val_loader, train_metric_loader
 
@@ -288,8 +318,8 @@ def evaluate(
     use_amp = device.type == "cuda"
     with torch.no_grad():
         for images, labels, _ in loader:
-            images = images.to(device)
-            labels = labels.to(device)
+            images = images.to(device, non_blocking=(device.type == "cuda"))
+            labels = labels.to(device, non_blocking=(device.type == "cuda"))
             with torch.amp.autocast("cuda", enabled=use_amp):
                 logits = _tta_logits(model, images, views=max(1, int(tta_views)))
                 loss = criterion(logits, labels)
@@ -506,8 +536,20 @@ def train(args: argparse.Namespace | None = None) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    deterministic = bool(getattr(args, "deterministic", False))
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = (not deterministic)
+
+    train_metric_every = max(1, int(getattr(args, "train_metric_every", 3)))
+    total_tta_views = max(1, int(getattr(args, "tta_views", 1)))
+    quick_val_tta_views = max(
+        1,
+        min(
+            int(getattr(args, "quick_val_tta_views", 1)),
+            total_tta_views,
+        ),
+    )
+    full_tta_on_save = bool(getattr(args, "full_tta_on_save", True))
 
     # Graceful device fallback keeps CLI behavior predictable.
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -649,6 +691,7 @@ def train(args: argparse.Namespace | None = None) -> None:
     }
     epochs_without_improve = 0
     epochs_with_large_gap = 0
+    last_full_train_acc: Optional[float] = None
 
     _print_terminal_review_header(
         max_epochs=int(args.epochs),
@@ -678,8 +721,8 @@ def train(args: argparse.Namespace | None = None) -> None:
         epoch_grad_norm_max = 0.0
         epoch_batches = 0
         for images, labels, _ in pbar:
-            images = images.to(device)
-            labels = labels.to(device)
+            images = images.to(device, non_blocking=(device.type == "cuda"))
+            labels = labels.to(device, non_blocking=(device.type == "cuda"))
             mixed_images, labels_a, labels_b, lam = _mixup_batch(
                 images, labels, mixup_alpha, device
             )
@@ -717,25 +760,56 @@ def train(args: argparse.Namespace | None = None) -> None:
             pbar.set_postfix(mat_mat=loss.item())
 
         epoch_loss = running_loss / max(len(train_loader.dataset), 1)
-        # Measure train accuracy on clean train samples (no mixup) for stable, comparable curves.
+        # Use fast approximate train metric most epochs; run exact clean-train evaluation periodically.
+        approx_train_acc = float(running_correct / max(running_total, 1))
+        compute_full_train_metric = (
+            epoch == 1
+            or epoch == int(args.epochs)
+            or (epoch % train_metric_every == 0)
+        )
+
         ema_backup: Optional[Dict[str, torch.Tensor]] = None
         if ema is not None:
             ema_backup = ema.apply(model)
 
-        train_acc, _train_eval_loss = evaluate(
-            model,
-            train_metric_loader,
-            device,
-            criterion,
-            tta_views=1,
-        )
-        val_acc, val_loss = evaluate(
+        if compute_full_train_metric:
+            train_acc, _train_eval_loss = evaluate(
+                model,
+                train_metric_loader,
+                device,
+                criterion,
+                tta_views=1,
+            )
+            train_metric_mode = "full"
+            last_full_train_acc = float(train_acc)
+        else:
+            train_acc = approx_train_acc
+            train_metric_mode = "approx"
+
+        val_acc_quick, val_loss_quick = evaluate(
             model,
             val_loader,
             device,
             criterion,
-            tta_views=max(1, int(getattr(args, "tta_views", 1))),
+            tta_views=quick_val_tta_views,
         )
+        val_acc = float(val_acc_quick)
+        val_loss = float(val_loss_quick)
+        val_metric_mode = f"quick@{quick_val_tta_views}"
+
+        if (
+            full_tta_on_save
+            and total_tta_views > quick_val_tta_views
+            and val_acc_quick > (best_acc + 1e-4)
+        ):
+            val_acc, val_loss = evaluate(
+                model,
+                val_loader,
+                device,
+                criterion,
+                tta_views=total_tta_views,
+            )
+            val_metric_mode = f"full@{total_tta_views}"
 
         if ema is not None and ema_backup is not None:
             ema.restore(model, ema_backup)
@@ -747,7 +821,7 @@ def train(args: argparse.Namespace | None = None) -> None:
         history["val_acc"].append(float(val_acc))
 
         gap = float(train_acc - val_acc)
-        if gap > float(getattr(args, "max_train_val_gap", 0.18)) and epoch >= gap_guard_start_epoch:
+        if compute_full_train_metric and gap > float(getattr(args, "max_train_val_gap", 0.18)) and epoch >= gap_guard_start_epoch:
             epochs_with_large_gap += 1
         else:
             epochs_with_large_gap = 0
@@ -811,7 +885,8 @@ def train(args: argparse.Namespace | None = None) -> None:
 
         print(
             f"{epoch:>5} | {epoch_loss:>7.4f} | {val_loss:>7.4f} | "
-            f"{train_acc:>6.4f} | {val_acc:>6.4f} | {stage:<7} | {status}"
+            f"{train_acc:>6.4f} | {val_acc:>6.4f} | {stage:<7} | {status} "
+            f"[{train_metric_mode},{val_metric_mode}]"
         )
 
         if epochs_without_improve >= args.early_stop_patience:
