@@ -70,6 +70,9 @@ def train_models(
     seed: int = 42,
     max_train_val_gap: float = 0.06,
     freeze_backbone_epochs: int = 5,
+    backbone_lr_scale: float = 0.2,
+    ema_decay: float = 0.997,
+    tta_views: int = 3,
     output_dir: str = "models",
 ) -> bool:
     """Train Models"""
@@ -86,6 +89,9 @@ def train_models(
 
         model_gap = float(config.get("max_train_val_gap", max_train_val_gap))
         model_freeze_epochs = int(config.get("freeze_backbone_epochs", freeze_backbone_epochs))
+        model_backbone_lr_scale = float(config.get("backbone_lr_scale", backbone_lr_scale))
+        model_ema_decay = float(config.get("ema_decay", ema_decay))
+        model_tta_views = int(config.get("tta_views", tta_views))
         
         cmd = [
             sys.executable,
@@ -118,6 +124,12 @@ def train_models(
             str(model_gap),
             "--freeze-backbone-epochs",
             str(model_freeze_epochs),
+            "--backbone-lr-scale",
+            str(model_backbone_lr_scale),
+            "--ema-decay",
+            str(model_ema_decay),
+            "--tta-views",
+            str(model_tta_views),
             "--device",
             device,
             "--output-dir",
@@ -149,7 +161,7 @@ def evaluate_models(
     cmd = [
         sys.executable,
         "-m",
-        "src.evaluate_report",
+        "src.evaluation.evaluate_report",
         "--data-dir",
         data_dir,
         "--models-dir",

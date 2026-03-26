@@ -46,7 +46,6 @@ flowchart LR
 THUOC/
   run_all.py
   train_cli.py
-  run_gui.py
   review_terminal.py
   optimal_configs.py
   requirements.txt
@@ -69,46 +68,49 @@ THUOC/
 - single: train 1 model
 - optimize: tuning nhieu vong
 
-3. run_gui.py
-- Mo giao dien Tkinter de thu nghiem so sanh anh.
-
-4. review_terminal.py
+3. review_terminal.py
 - Hien thi review ket qua train va goi y dieu chinh hyperparameter.
 
-5. optimal_configs.py
+4. optimal_configs.py
 - Chua OPTIMAL_CONFIGS va TUNING_CANDIDATES.
 
-### Core modules trong src
+### Core modules trong src (da phan theo nhom)
 
-1. src/train.py
+1. src/training/train.py
 - Training engine: train loop, validation loop, early stopping, save checkpoint.
 
-2. src/models.py
-- Tao va load 3 kien truc: resnet50, efficientnet_b0, vit_b_16.
+2. src/models/resnet50.py
+- Dinh nghia model ResNet50 va classifier head.
 
-3. src/features.py
+3. src/models/efficientnet_b0.py
+- Dinh nghia model EfficientNet-B0 va classifier head.
+
+4. src/models/vit_b_16.py
+- Dinh nghia model ViT-B/16 va classifier head.
+
+5. src/models/model_factory.py
+- Tao model theo ten va load checkpoint/class mapping.
+
+6. src/data/features.py
 - PillImageDataset, transforms, augmentation, class_to_idx.
 
-4. src/pipeline.py
+7. src/orchestration/pipeline.py
 - Orchestration: discover data dir, train all, evaluate all, ensemble.
 
-5. src/inference.py
+8. src/inference/inference.py
 - Load model, predict mot anh, confidence score, class mapping safety.
 
-6. src/evaluate_report.py
+9. src/evaluation/evaluate_report.py
 - Tinh metrics va xuat report (csv/json/png).
 
-7. src/build_epillid_data.py
+10. src/data/build_epillid_data.py
 - Build/align du lieu train-val-test tu nguon raw.
 
-8. src/metadata.py
+11. src/data/metadata.py
 - Parse metadata csv cho thong tin thuoc.
 
-9. src/self_learning.py
+12. src/learning/self_learning.py
 - Ghi feedback va hard examples de cai thien ve sau.
-
-10. src/gui_tk.py
-- Logic giao dien desktop.
 
 ---
 

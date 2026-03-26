@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-from src import train as train_module
-from src import pipeline as pipeline_module
+from src.orchestration.pipeline import run_pipeline
+from src.training.train import train as train_one_model
 import review_terminal as review_module
 
 
@@ -42,6 +42,9 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--label-smoothing", type=float, default=0.1)
     parser.add_argument("--mixup-alpha", type=float, default=0.2)
+    parser.add_argument("--backbone-lr-scale", type=float, default=0.2)
+    parser.add_argument("--ema-decay", type=float, default=0.997)
+    parser.add_argument("--tta-views", type=int, default=3)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument(
         "--device",
@@ -71,6 +74,9 @@ def main() -> None:
             weight_decay=args.weight_decay,
             label_smoothing=args.label_smoothing,
             mixup_alpha=args.mixup_alpha,
+            backbone_lr_scale=args.backbone_lr_scale,
+            ema_decay=args.ema_decay,
+            tta_views=args.tta_views,
             num_workers=args.num_workers,
             device=args.device,
             early_stop_patience=args.early_stop_patience,
@@ -81,7 +87,7 @@ def main() -> None:
             save_curves=True,
             pretrained=True,
         )
-        pipeline_module.run_pipeline(pipeline_args)
+        run_pipeline(pipeline_args)
         return
 
     if args.mode == "optimize":
@@ -97,6 +103,9 @@ def main() -> None:
             weight_decay=args.weight_decay,
             label_smoothing=args.label_smoothing,
             mixup_alpha=args.mixup_alpha,
+            backbone_lr_scale=args.backbone_lr_scale,
+            ema_decay=args.ema_decay,
+            tta_views=args.tta_views,
             early_stop_patience=args.early_stop_patience,
             max_train_val_gap=args.max_train_val_gap,
             seed=args.seed,
@@ -122,6 +131,9 @@ def main() -> None:
         weight_decay=args.weight_decay,
         label_smoothing=args.label_smoothing,
         mixup_alpha=args.mixup_alpha,
+        backbone_lr_scale=args.backbone_lr_scale,
+        ema_decay=args.ema_decay,
+        tta_views=args.tta_views,
         num_workers=args.num_workers,
         device=args.device,
         output_dir=args.output_dir,
@@ -132,7 +144,7 @@ def main() -> None:
         save_curves=True,
         pretrained=True,
     )
-    train_module.train(train_args)
+    train_one_model(train_args)
 
 
 if __name__ == "__main__":

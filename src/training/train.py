@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import random
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -14,8 +13,8 @@ import torch.nn as nn
 from torch.utils.data import ConcatDataset, DataLoader, Subset
 from tqdm import tqdm
 
-from .features import PillImageDataset, build_transforms
-from .models import create_model, load_checkpoint_class_to_idx
+from ..data.features import PillImageDataset, build_transforms
+from ..models.model_factory import create_model, load_checkpoint_class_to_idx
 
 
 LOGGER = logging.getLogger(__name__)
@@ -90,6 +89,24 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=24,
         help="Minimum validation sample target before enabling train->val stratified holdout",
+    )
+    parser.add_argument(
+        "--backbone-lr-scale",
+        type=float,
+        default=0.2,
+        help="Backbone lr multiplier compared to classifier head lr",
+    )
+    parser.add_argument(
+        "--ema-decay",
+        type=float,
+        default=0.997,
+        help="EMA decay for model parameters (<=0 to disable)",
+    )
+    parser.add_argument(
+        "--tta-views",
+        type=int,
+        default=3,
+        help="Number of TTA views used for validation evaluation",
     )
     return parser.parse_args()
 
@@ -235,7 +252,30 @@ def _mixup_batch(
     return mixed_images, labels_a, labels_b, lam
 
 
-def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, criterion: nn.Module) -> Tuple[float, float]:
+def _tta_logits(model: nn.Module, images: torch.Tensor, views: int = 1) -> torch.Tensor:
+    if views <= 1:
+        return model(images)
+
+    logits_list: List[torch.Tensor] = [model(images)]
+    if views >= 2:
+        logits_list.append(model(torch.flip(images, dims=[3])))
+    if views >= 3:
+        logits_list.append(model(torch.flip(images, dims=[2])))
+    if views >= 4:
+        logits_list.append(model(torch.rot90(images, 1, dims=[2, 3])))
+    if views >= 5:
+        logits_list.append(model(torch.rot90(images, 3, dims=[2, 3])))
+
+    return torch.stack(logits_list, dim=0).mean(dim=0)
+
+
+def evaluate(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    criterion: nn.Module,
+    tta_views: int = 1,
+) -> Tuple[float, float]:
     model.eval()
     correct, total = 0, 0
     running_loss = 0.0
@@ -245,7 +285,7 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, criteri
             images = images.to(device)
             labels = labels.to(device)
             with torch.amp.autocast("cuda", enabled=use_amp):
-                logits = model(images)
+                logits = _tta_logits(model, images, views=max(1, int(tta_views)))
                 loss = criterion(logits, labels)
             preds = torch.argmax(logits, dim=1)
             correct += (preds == labels).sum().item()
@@ -253,6 +293,68 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, criteri
             running_loss += loss.item() * images.size(0)
     avg_loss = running_loss / max(total, 1)
     return correct / max(total, 1), avg_loss
+
+
+class ExponentialMovingAverage:
+    def __init__(self, model: nn.Module, decay: float) -> None:
+        self.decay = float(decay)
+        self.shadow: Dict[str, torch.Tensor] = {
+            name: p.detach().clone()
+            for name, p in model.named_parameters()
+            if p.requires_grad
+        }
+
+    def update(self, model: nn.Module) -> None:
+        for name, p in model.named_parameters():
+            if not p.requires_grad or name not in self.shadow:
+                continue
+            self.shadow[name].mul_(self.decay).add_(p.detach(), alpha=(1.0 - self.decay))
+
+    def apply(self, model: nn.Module) -> Dict[str, torch.Tensor]:
+        backup: Dict[str, torch.Tensor] = {}
+        for name, p in model.named_parameters():
+            if not p.requires_grad or name not in self.shadow:
+                continue
+            backup[name] = p.detach().clone()
+            p.data.copy_(self.shadow[name].data)
+        return backup
+
+    def restore(self, model: nn.Module, backup: Dict[str, torch.Tensor]) -> None:
+        for name, p in model.named_parameters():
+            if name in backup:
+                p.data.copy_(backup[name].data)
+
+
+def _split_parameter_groups(
+    model: nn.Module,
+    model_name: str,
+    base_lr: float,
+    backbone_lr_scale: float,
+) -> List[Dict[str, object]]:
+    head_prefixes = {
+        "resnet50": ("fc.",),
+        "efficientnet_b0": ("classifier.",),
+        "vit_b_16": ("heads.",),
+    }.get(model_name, tuple())
+
+    head_params: List[torch.nn.Parameter] = []
+    backbone_params: List[torch.nn.Parameter] = []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if head_prefixes and name.startswith(head_prefixes):
+            head_params.append(p)
+        else:
+            backbone_params.append(p)
+
+    if not head_params or not backbone_params:
+        return [{"params": [p for p in model.parameters() if p.requires_grad], "lr": float(base_lr)}]
+
+    scaled_backbone_lr = float(base_lr) * max(0.05, min(float(backbone_lr_scale), 1.0))
+    return [
+        {"params": backbone_params, "lr": scaled_backbone_lr},
+        {"params": head_params, "lr": float(base_lr)},
+    ]
 
 
 def _plot_training_curves(history: Dict[str, List[float]], output_path: str) -> None:
@@ -440,8 +542,8 @@ def train(args: argparse.Namespace | None = None) -> None:
     gap_guard_start_epoch = 3
     if n_train <= 64:
         # On very small datasets, heavy regularization often pushes val acc to 0 for CNN backbones.
-        label_smoothing = min(label_smoothing, 0.05)
-        mixup_alpha = min(mixup_alpha, 0.08)
+        label_smoothing = min(label_smoothing, 0.02)
+        mixup_alpha = min(mixup_alpha, 0.04)
         if args.model in {"resnet50", "efficientnet_b0"} and float(args.lr) < 1.8e-4:
             args.lr = 1.8e-4
         if int(getattr(args, "freeze_backbone_epochs", 0)) > 2:
@@ -462,16 +564,33 @@ def train(args: argparse.Namespace | None = None) -> None:
         weight=class_weight_tensor,
         label_smoothing=label_smoothing,
     )
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    backbone_lr_scale = float(getattr(args, "backbone_lr_scale", 0.2))
+    param_groups = _split_parameter_groups(
+        model=model,
+        model_name=args.model,
+        base_lr=float(args.lr),
+        backbone_lr_scale=backbone_lr_scale,
     )
+    optimizer = torch.optim.AdamW(
+        param_groups,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
+    for pg in optimizer.param_groups:
+        pg["initial_lr"] = float(pg["lr"])
     base_lr = float(args.lr)
-    warmup_epochs = 3
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.7, patience=2, min_lr=base_lr * 0.1
+    warmup_epochs = 2
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=max(2, int(args.epochs) - warmup_epochs),
+        eta_min=base_lr * 0.08,
     )
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     freeze_backbone_epochs = int(getattr(args, "freeze_backbone_epochs", 0))
+    ema_decay = float(getattr(args, "ema_decay", 0.997))
+    ema: Optional[ExponentialMovingAverage] = None
+    if ema_decay > 0:
+        ema = ExponentialMovingAverage(model, decay=min(max(ema_decay, 0.9), 0.9999))
 
     metrics_path = os.path.join(args.output_dir, f"{args.model}_epillid_best.metrics.json")
     ckpt_path = os.path.join(args.output_dir, f"{args.model}_epillid_best.pt")
@@ -536,9 +655,9 @@ def train(args: argparse.Namespace | None = None) -> None:
                 _set_backbone_trainable(model, args.model, trainable=True)
 
         if epoch <= warmup_epochs:
-            warmup_lr = base_lr * (0.4 + 0.6 * (epoch / warmup_epochs))
+            warmup_scale = 0.35 + 0.65 * (epoch / warmup_epochs)
             for pg in optimizer.param_groups:
-                pg["lr"] = warmup_lr
+                pg["lr"] = float(pg.get("initial_lr", pg["lr"])) * warmup_scale
 
         model.train()
         running_loss = 0.0
@@ -576,6 +695,8 @@ def train(args: argparse.Namespace | None = None) -> None:
 
             scaler.step(optimizer)
             scaler.update()
+            if ema is not None:
+                ema.update(model)
 
             running_loss += loss.item() * images.size(0)
             preds = torch.argmax(logits, dim=1)
@@ -587,8 +708,27 @@ def train(args: argparse.Namespace | None = None) -> None:
 
         epoch_loss = running_loss / max(len(train_loader.dataset), 1)
         # Measure train accuracy on clean train samples (no mixup) for stable, comparable curves.
-        train_acc, _train_eval_loss = evaluate(model, train_metric_loader, device, criterion)
-        val_acc, val_loss = evaluate(model, val_loader, device, criterion)
+        ema_backup: Optional[Dict[str, torch.Tensor]] = None
+        if ema is not None:
+            ema_backup = ema.apply(model)
+
+        train_acc, _train_eval_loss = evaluate(
+            model,
+            train_metric_loader,
+            device,
+            criterion,
+            tta_views=1,
+        )
+        val_acc, val_loss = evaluate(
+            model,
+            val_loader,
+            device,
+            criterion,
+            tta_views=max(1, int(getattr(args, "tta_views", 1))),
+        )
+
+        if ema is not None and ema_backup is not None:
+            ema.restore(model, ema_backup)
 
         history["epoch"].append(epoch)
         history["train_loss"].append(float(epoch_loss))
@@ -602,9 +742,9 @@ def train(args: argparse.Namespace | None = None) -> None:
         else:
             epochs_with_large_gap = 0
 
-        prev_lr = float(optimizer.param_groups[0]["lr"])
+        prev_lr = float(max(pg["lr"] for pg in optimizer.param_groups))
         if epoch > warmup_epochs:
-            scheduler.step(val_loss)
+            scheduler.step()
         next_lr = float(optimizer.param_groups[0]["lr"])
 
         if _is_diag_epoch(epoch):
@@ -618,7 +758,7 @@ def train(args: argparse.Namespace | None = None) -> None:
             if next_lr != prev_lr:
                 print(
                     "[DIAG] "
-                    f"scheduler_event=ReduceLROnPlateau lr_changed_from={prev_lr:.8f} to={next_lr:.8f}"
+                    f"scheduler_event=CosineAnnealingLR lr_changed_from={prev_lr:.8f} to={next_lr:.8f}"
                 )
 
         saved_this_epoch = False
@@ -643,6 +783,9 @@ def train(args: argparse.Namespace | None = None) -> None:
                 "weight_decay": args.weight_decay,
                 "label_smoothing": label_smoothing,
                 "mixup_alpha": mixup_alpha,
+                "backbone_lr_scale": backbone_lr_scale,
+                "ema_decay": ema_decay,
+                "tta_views": int(getattr(args, "tta_views", 1)),
             }
             epochs_without_improve = 0
             saved_this_epoch = True

@@ -9,6 +9,7 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
 
 
 IMG_SIZE = 224
@@ -19,11 +20,35 @@ def build_transforms(train: bool = True) -> T.Compose:
     if train:
         return T.Compose(
             [
-                T.Resize((IMG_SIZE, IMG_SIZE)),
-                T.ColorJitter(brightness=0.08, contrast=0.08, saturation=0.08),
-                T.RandomHorizontalFlip(),
-                T.RandomRotation(5),
+                T.RandomResizedCrop(
+                    (IMG_SIZE, IMG_SIZE),
+                    scale=(0.72, 1.0),
+                    ratio=(0.88, 1.12),
+                    interpolation=InterpolationMode.BICUBIC,
+                    antialias=True,
+                ),
+                T.RandomHorizontalFlip(p=0.5),
+                T.RandomVerticalFlip(p=0.1),
+                T.RandomApply(
+                    [
+                        T.ColorJitter(
+                            brightness=0.12,
+                            contrast=0.12,
+                            saturation=0.10,
+                            hue=0.02,
+                        )
+                    ],
+                    p=0.7,
+                ),
+                T.RandomAffine(
+                    degrees=8,
+                    translate=(0.06, 0.06),
+                    scale=(0.92, 1.08),
+                    interpolation=InterpolationMode.BILINEAR,
+                ),
+                T.RandomPerspective(distortion_scale=0.15, p=0.25),
                 T.ToTensor(),
+                T.RandomErasing(p=0.20, scale=(0.01, 0.08), ratio=(0.3, 3.3), value="random"),
                 T.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
@@ -33,7 +58,8 @@ def build_transforms(train: bool = True) -> T.Compose:
     else:
         return T.Compose(
             [
-                T.Resize((IMG_SIZE, IMG_SIZE)),
+                T.Resize(int(IMG_SIZE * 1.15), interpolation=InterpolationMode.BICUBIC, antialias=True),
+                T.CenterCrop((IMG_SIZE, IMG_SIZE)),
                 T.ToTensor(),
                 T.Normalize(
                     mean=[0.485, 0.456, 0.406],

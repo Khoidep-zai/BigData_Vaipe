@@ -3,8 +3,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from src.features import compute_image_statistics
-from src.inference import _compare_colors, _compare_size, _compare_texture
+from src.data.features import compute_image_statistics
+from src.inference.inference import _compare_colors, _compare_size, _compare_texture
 
 
 def _create_image(path: Path, color=(128, 128, 128), size=(100, 50)):

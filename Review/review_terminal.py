@@ -13,9 +13,9 @@ from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.features import PillImageDataset, build_transforms
-from src.models import load_checkpoint, load_checkpoint_class_to_idx
-from src.train import train as train_one_model
+from src.data.features import PillImageDataset, build_transforms
+from src.models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
+from src.training.train import train as train_one_model
 
 DEFAULT_MODELS = ["resnet50", "efficientnet_b0", "vit_b_16"]
 

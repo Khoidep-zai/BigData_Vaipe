@@ -15,9 +15,9 @@ import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from torch.utils.data import DataLoader
 
-from .features import PillImageDataset, build_transforms
-from .models import load_checkpoint, load_checkpoint_class_to_idx
-from .train import train as train_one_model
+from ..data.features import PillImageDataset, build_transforms
+from ..models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
+from ..training.train import train as train_one_model
 
 DEFAULT_MODELS = ["resnet50", "efficientnet_b0", "vit_b_16"]
 
@@ -364,6 +364,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--label-smoothing", type=float, default=0.1)
     parser.add_argument("--mixup-alpha", type=float, default=0.2)
+    parser.add_argument("--backbone-lr-scale", type=float, default=0.2)
+    parser.add_argument("--ema-decay", type=float, default=0.997)
+    parser.add_argument("--tta-views", type=int, default=3)
     parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 2)
     parser.add_argument(
         "--device",
@@ -430,6 +433,9 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
             weight_decay=args.weight_decay,
             label_smoothing=float(getattr(args, "label_smoothing", 0.1)),
             mixup_alpha=float(getattr(args, "mixup_alpha", 0.2)),
+            backbone_lr_scale=float(getattr(args, "backbone_lr_scale", 0.2)),
+            ema_decay=float(getattr(args, "ema_decay", 0.997)),
+            tta_views=int(getattr(args, "tta_views", 3)),
             num_workers=args.num_workers,
             device=device_name,
             output_dir=str(models_dir),

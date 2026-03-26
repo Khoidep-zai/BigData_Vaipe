@@ -12,9 +12,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .features import build_transforms, compute_image_statistics, pil_loader, focus_on_object
-from .metadata import MedicineMetadataIndex
-from .models import load_checkpoint, load_checkpoint_class_to_idx
+from ..data.features import build_transforms, compute_image_statistics, pil_loader, focus_on_object
+from ..data.metadata import MedicineMetadataIndex
+from ..models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
 
 
 @dataclass

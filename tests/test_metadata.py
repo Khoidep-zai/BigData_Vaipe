@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.metadata import MedicineMetadataIndex
+from src.data.metadata import MedicineMetadataIndex
 
 
 def test_metadata_best_match_from_class_name(tmp_path: Path):

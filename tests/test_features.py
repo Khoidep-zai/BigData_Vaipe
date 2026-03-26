@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from src.features import build_transforms, compute_image_statistics, focus_on_object
+from src.data.features import build_transforms, compute_image_statistics, focus_on_object
 
 
 def test_build_transforms_train_and_eval():

@@ -11,8 +11,8 @@ import torch
 from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader
 
-from .features import PillImageDataset, build_transforms
-from .models import load_checkpoint, load_checkpoint_class_to_idx
+from ..data.features import PillImageDataset, build_transforms
+from ..models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
 
 
 def parse_args() -> argparse.Namespace:
