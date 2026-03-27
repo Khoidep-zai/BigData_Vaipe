@@ -1,46 +1,52 @@
-"""Cau hinh uu tien train/val on dinh va bam sat nhau tren dataset nho."""
+"""Cau hinh toi uu: tang regularization, giu train/val gap nho, hoi tu nhanh."""
 
-# Muc tieu: giam overfitting, giu train/val gap nho va duong cong on dinh.
+# Muc tieu: train/val chay song song, accuracy cao, thoi gian train giam.
+# Thay doi so voi phien ban cu:
+#   - Tang label_smoothing, mixup_alpha, weight_decay → giam overfitting
+#   - Giam lr → on dinh hoi tu
+#   - Giam epochs (28/32) + patience (6/7) → dung som khi da tot
+#   - Tang freeze_backbone_epochs (3-5) → head on dinh truoc khi unfreeze
+#   - Giam backbone_lr_scale (0.15) → backbone hoc cham hon head
 OPTIMAL_CONFIGS = {
     "resnet50": {
-        "lr": 3e-4,
-        "weight_decay": 3e-4,
-        "label_smoothing": 0.03,
-        "mixup_alpha": 0.05,
-        "epochs": 40,
+        "lr": 6e-5,
+        "weight_decay": 1.2e-3,
+        "label_smoothing": 0.16,
+        "mixup_alpha": 0.35,
+        "epochs": 28,
         "batch_size": 16,
-        "early_stop_patience": 10,
-        "max_train_val_gap": 0.22,
-        "freeze_backbone_epochs": 1,
-        "backbone_lr_scale": 0.20,
-        "ema_decay": 0.997,
+        "early_stop_patience": 6,
+        "max_train_val_gap": 0.15,
+        "freeze_backbone_epochs": 3,
+        "backbone_lr_scale": 0.15,
+        "ema_decay": 0.998,
         "tta_views": 3,
     },
     "efficientnet_b0": {
-        "lr": 2.5e-4,
-        "weight_decay": 4e-4,
-        "label_smoothing": 0.03,
-        "mixup_alpha": 0.05,
-        "epochs": 40,
+        "lr": 7e-5,
+        "weight_decay": 1e-3,
+        "label_smoothing": 0.15,
+        "mixup_alpha": 0.33,
+        "epochs": 28,
         "batch_size": 16,
-        "early_stop_patience": 10,
-        "max_train_val_gap": 0.22,
-        "freeze_backbone_epochs": 1,
-        "backbone_lr_scale": 0.20,
-        "ema_decay": 0.997,
+        "early_stop_patience": 6,
+        "max_train_val_gap": 0.15,
+        "freeze_backbone_epochs": 3,
+        "backbone_lr_scale": 0.15,
+        "ema_decay": 0.998,
         "tta_views": 3,
     },
     "vit_b_16": {
-        "lr": 8e-5,
-        "weight_decay": 8e-4,
-        "label_smoothing": 0.08,
-        "mixup_alpha": 0.12,
-        "epochs": 36,
+        "lr": 5e-5,
+        "weight_decay": 1.4e-3,
+        "label_smoothing": 0.20,
+        "mixup_alpha": 0.42,
+        "epochs": 32,
         "batch_size": 16,
-        "early_stop_patience": 9,
-        "max_train_val_gap": 0.18,
-        "freeze_backbone_epochs": 3,
-        "backbone_lr_scale": 0.25,
+        "early_stop_patience": 7,
+        "max_train_val_gap": 0.12,
+        "freeze_backbone_epochs": 5,
+        "backbone_lr_scale": 0.12,
         "ema_decay": 0.998,
         "tta_views": 5,
     },

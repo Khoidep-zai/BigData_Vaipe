@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as T
@@ -23,36 +23,42 @@ def build_transforms(train: bool = True) -> T.Compose:
     if train:
         return T.Compose(
             [
-                # Áp dụng các biến đổi hình học và màu sắc (xoay, cắt, chỉnh màu) để giúp mô hình học tốt hơn, tránh học vẹt trên tập dữ liệu nhỏ.
+                # Cắt ngẫu nhiên vùng ảnh rồi scale lên 224×224 → tăng đa dạng vị trí và kích thước viên thuốc.
                 T.RandomResizedCrop(
                     (IMG_SIZE, IMG_SIZE),
-                    scale=(0.72, 1.0),
-                    ratio=(0.88, 1.12),
+                    scale=(0.68, 1.0),
+                    ratio=(0.85, 1.15),
                     interpolation=InterpolationMode.BICUBIC,
                     antialias=True,
                 ),
                 T.RandomHorizontalFlip(p=0.5),
-                T.RandomVerticalFlip(p=0.1),
+                T.RandomVerticalFlip(p=0.15),
+                # ColorJitter mô phỏng ánh sáng và nền khác nhau khi chụp thuốc.
                 T.RandomApply(
                     [
                         T.ColorJitter(
-                            brightness=0.12,
-                            contrast=0.12,
-                            saturation=0.10,
-                            hue=0.02,
+                            brightness=0.15,
+                            contrast=0.15,
+                            saturation=0.12,
+                            hue=0.03,
                         )
                     ],
                     p=0.7,
                 ),
                 T.RandomAffine(
-                    degrees=8,
-                    translate=(0.06, 0.06),
-                    scale=(0.92, 1.08),
+                    degrees=10,
+                    translate=(0.08, 0.08),
+                    scale=(0.90, 1.10),
                     interpolation=InterpolationMode.BILINEAR,
                 ),
                 T.RandomPerspective(distortion_scale=0.15, p=0.25),
+                # GaussianBlur mô phỏng ảnh thuốc bị mờ do camera không focus.
+                T.RandomApply([T.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))], p=0.2),
+                # RandomAdjustSharpness mô phỏng camera có chất lượng sắc nét khác nhau.
+                T.RandomAdjustSharpness(sharpness_factor=1.5, p=0.2),
                 T.ToTensor(),
-                T.RandomErasing(p=0.20, scale=(0.01, 0.08), ratio=(0.3, 3.3), value="random"),
+                # RandomErasing che một phần ảnh → buộc model nhìn nhiều vùng đặc trưng hơn.
+                T.RandomErasing(p=0.25, scale=(0.02, 0.12), ratio=(0.3, 3.3), value="random"),
                 T.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
@@ -72,6 +78,10 @@ def build_transforms(train: bool = True) -> T.Compose:
                 ),
             ]
         )
+
+
+# Alias giữ tương thích ngược với code gọi get_transforms().
+get_transforms = build_transforms
 
 
 def pil_loader(path: str) -> Image.Image:
@@ -177,12 +187,56 @@ def compute_image_statistics(img: Image.Image) -> dict:
     }
 
 
+def _compute_hsv_histogram(img_rgb: Image.Image, bins: int = 8) -> np.ndarray:
+    """Tính histogram HSV (H, S, V mỗi kênh bins giá trị) → 3*bins chiều.
+    Histogram màu phong phú hơn mean RGB rất nhiều khi so sánh 2 viên thuốc."""
+    hsv = img_rgb.convert("HSV")
+    arr = np.array(hsv, dtype=np.float32)
+    hist_parts = []
+    for ch in range(3):
+        channel = arr[:, :, ch]
+        max_val = 360.0 if ch == 0 else 255.0
+        h, _ = np.histogram(channel / max_val, bins=bins, range=(0.0, 1.0))
+        total = max(h.sum(), 1)
+        hist_parts.append(h.astype(np.float32) / total)
+    return np.concatenate(hist_parts)
+
+
+def _compute_edge_density(gray_arr: np.ndarray) -> float:
+    """Tính mật độ cạnh bằng Sobel filter → phản ánh vân/chi tiết trên bề mặt thuốc."""
+    from PIL import ImageFilter as _IF
+    # Convert numpy gray array to PIL, apply Sobel
+    gray_img = Image.fromarray((gray_arr * 255).astype(np.uint8), mode="L")
+    edges = gray_img.filter(_IF.FIND_EDGES)
+    edge_arr = np.array(edges, dtype=np.float32) / 255.0
+    return float(edge_arr.mean())
+
+
+def _compute_quadrant_luminance(gray_arr: np.ndarray) -> np.ndarray:
+    """Tính luminance trung bình ở 4 góc phần tư ảnh → phân biệt thuốc hai tông màu."""
+    h, w = gray_arr.shape
+    mid_h, mid_w = h // 2, w // 2
+    if mid_h == 0 or mid_w == 0:
+        return np.zeros(4, dtype=np.float32)
+    quads = [
+        gray_arr[:mid_h, :mid_w],       # top-left
+        gray_arr[:mid_h, mid_w:],        # top-right
+        gray_arr[mid_h:, :mid_w],        # bottom-left
+        gray_arr[mid_h:, mid_w:],        # bottom-right
+    ]
+    return np.array([float(q.mean()) for q in quads], dtype=np.float32)
+
+
 def image_to_numeric_vector(img: Image.Image, thumbnail_size: int = 16) -> np.ndarray:
     """
     Chuyen anh thanh vector so de phuc vu phan tich/thuc nghiem.
 
-    Vector gom:
-    - 8 gia tri thong ke (mean/std RGB, texture std, aspect ratio)
+    Vector v2 gom (~295 chieu voi thumbnail_size=16, bins=8):
+    - 8 gia tri thong ke co ban (mean/std RGB, texture std, aspect ratio)
+    - 24 gia tri histogram HSV (8 bins x 3 kenh H, S, V)
+    - 1 gia tri edge density (mat do canh Sobel)
+    - 4 gia tri quadrant luminance (do sang 4 goc)
+    - 2 gia tri brightness + contrast
     - Anh grayscale thumbnail duoc flatten (thumbnail_size * thumbnail_size)
     """
     img_focused = focus_on_object(img, scale=0.85)
@@ -195,13 +249,8 @@ def image_to_numeric_vector(img: Image.Image, thumbnail_size: int = 16) -> np.nd
     texture_std = float(gray_arr.std())
     aspect_ratio = float(w / max(h, 1))
 
-    thumb = img_focused.convert("L").resize(
-        (thumbnail_size, thumbnail_size),
-        resample=Image.BILINEAR,
-    )
-    thumb_flat = (np.array(thumb, dtype=np.float32) / 255.0).reshape(-1)
-
-    stats = np.array(
+    # Thống kê cơ bản (8 chiều)
+    stats_basic = np.array(
         [
             float(mean_rgb[0]),
             float(mean_rgb[1]),
@@ -214,7 +263,32 @@ def image_to_numeric_vector(img: Image.Image, thumbnail_size: int = 16) -> np.nd
         ],
         dtype=np.float32,
     )
-    return np.concatenate([stats, thumb_flat], axis=0).astype(np.float32)
+
+    # Histogram HSV (24 chiều) → nắm bắt phân phối màu chi tiết
+    hsv_hist = _compute_hsv_histogram(img_focused, bins=8)
+
+    # Edge density (1 chiều) → phản ánh chi tiết bề mặt
+    edge_density = np.array([_compute_edge_density(gray_arr)], dtype=np.float32)
+
+    # Quadrant luminance (4 chiều) → phân biệt thuốc hai tông
+    quad_lum = _compute_quadrant_luminance(gray_arr)
+
+    # Brightness và contrast bổ sung (2 chiều)
+    brightness = float(gray_arr.mean())
+    contrast = float(gray_arr.max() - gray_arr.min())
+    bright_contrast = np.array([brightness, contrast], dtype=np.float32)
+
+    # Thumbnail flatten (thumbnail_size^2 chiều)
+    thumb = img_focused.convert("L").resize(
+        (thumbnail_size, thumbnail_size),
+        resample=Image.BILINEAR,
+    )
+    thumb_flat = (np.array(thumb, dtype=np.float32) / 255.0).reshape(-1)
+
+    return np.concatenate(
+        [stats_basic, hsv_hist, edge_density, quad_lum, bright_contrast, thumb_flat],
+        axis=0,
+    ).astype(np.float32)
 
 
 def image_vector_feature_names(thumbnail_size: int = 16) -> List[str]:
@@ -228,6 +302,19 @@ def image_vector_feature_names(thumbnail_size: int = 16) -> List[str]:
         "texture_std",
         "aspect_ratio",
     ]
+    # HSV histogram bins
+    for ch_name in ["h", "s", "v"]:
+        for b in range(8):
+            names.append(f"hist_{ch_name}_{b}")
+    # Edge density
+    names.append("edge_density")
+    # Quadrant luminance
+    for q in ["tl", "tr", "bl", "br"]:
+        names.append(f"quad_lum_{q}")
+    # Brightness/contrast
+    names.append("brightness")
+    names.append("contrast")
+    # Thumbnail pixels
     names.extend([f"px_{i:03d}" for i in range(thumbnail_size * thumbnail_size)])
     return names
 
@@ -271,4 +358,3 @@ def export_image_vectors_csv(
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-

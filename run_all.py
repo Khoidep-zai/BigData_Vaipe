@@ -64,6 +64,20 @@ def run_cmd(cmd: List[str], description: str = "") -> bool:
         return False
 
 
+def _resolve_runtime_device(requested_device: str) -> str:
+    if requested_device == "cpu":
+        return "cpu"
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    print("[WARN] CUDA không khả dụng ở runtime, chuyển sang CPU.")
+    return "cpu"
+
+
 def train_models(
     data_dir: str = "data",
     models: List[str] = None,
@@ -84,6 +98,7 @@ def train_models(
         models = ["resnet50", "efficientnet_b0", "vit_b_16"]
     
     success_count = 0
+    cpu_mode = str(device).lower() == "cpu"
     
     for model_name in models:
         config = OPTIMAL_CONFIGS.get(model_name)
@@ -100,6 +115,7 @@ def train_models(
         model_patience = int(config.get("early_stop_patience", 6))
         model_train_metric_every = 3
         model_quick_val_tta_views = 1
+        model_full_tta_on_save = True
 
         if fast_train:
             model_epochs = max(6, int(round(model_epochs * 0.45)))
@@ -108,6 +124,18 @@ def train_models(
             model_patience = min(model_patience, 4)
             model_freeze_epochs = min(model_freeze_epochs, 1)
             model_train_metric_every = 4
+            model_full_tta_on_save = False
+
+        if cpu_mode:
+            # CPU ưu tiên throughput: giảm các lượt evaluate nặng và giới hạn chi phí mỗi epoch.
+            model_train_metric_every = max(model_train_metric_every, 5)
+            model_full_tta_on_save = False
+            if not fast_train:
+                model_epochs = max(10, int(round(model_epochs * 0.60)))
+                model_tta_views = 1
+                model_ema_decay = 0.0
+                model_patience = min(model_patience, 5)
+                model_freeze_epochs = min(model_freeze_epochs, 2)
         
         # Gọi lệnh chạy thực tế qua file train_cli.py ở chế độ đơn lẻ (single) để huấn luyện.
         cmd = [
@@ -151,13 +179,17 @@ def train_models(
             str(model_train_metric_every),
             "--quick-val-tta-views",
             str(model_quick_val_tta_views),
-            "--full-tta-on-save",
             "--skip-metadata-artifacts",
             "--device",
             device,
             "--output-dir",
             output_dir,
         ]
+
+        if model_full_tta_on_save:
+            cmd.append("--full-tta-on-save")
+        else:
+            cmd.append("--no-full-tta-on-save")
         
         success = run_cmd(cmd, f"Training {model_name}")
         if success:
@@ -425,7 +457,7 @@ Examples:
   python run_all.py --model resnet50   # Run 1 model
   python run_all.py --compare-only     # Just compare results
   python run_all.py --data-dir data_aligned   # Custom data dir
-  python run_all.py --device cpu       # CPU mode (slow)
+    python run_all.py --device cpu       # CPU mode (auto optimized)
         """,
     )
     
@@ -499,6 +531,12 @@ Examples:
         help="Use faster training preset (fewer epochs, no EMA, no val-TTA).",
     )
     parser.add_argument(
+        "--cpu-optimize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Automatically apply CPU speed optimizations when effective device is CPU (default: enabled).",
+    )
+    parser.add_argument(
         "--skip-metadata-artifacts",
         action="store_true",
         help="Skip metadata clean/vector export at startup.",
@@ -539,13 +577,26 @@ Examples:
             sys.exit(1)
     
     models = ["resnet50", "efficientnet_b0", "vit_b_16"] if args.model == "all" else [args.model]
+    requested_device = args.device
+    runtime_device = _resolve_runtime_device(requested_device)
+    cpu_optimized = bool(args.cpu_optimize and runtime_device == "cpu")
+
+    if cpu_optimized and not args.fast_train:
+        args.fast_train = True
+        print(
+            "[CPU] Bật tự động chế độ train nhanh: giảm epochs, tắt EMA/TTA nặng để tăng tốc trên CPU. "
+            "Dùng --no-cpu-optimize để tắt."
+        )
+
+    args.device = runtime_device
     
     print(f"\n{'='*70}")
     print("🚀 THUOC - ALL-IN-ONE SETUP")
     print(f"{'='*70}")
     print(f"Models:       {', '.join(models)}")
     print(f"Data:         {args.data_dir}")
-    print(f"Device:       {args.device}")
+    print(f"Device Req:   {requested_device}")
+    print(f"Device Run:   {args.device}")
     print(f"Batch Size:   {args.batch_size}")
     print(f"Workers:      {args.num_workers}")
     print(f"Seed:         {args.seed}")
@@ -553,6 +604,7 @@ Examples:
     print(f"Freeze BB:    {args.freeze_backbone_epochs}")
     print(f"Output:       {args.output_dir}")
     print(f"Fast Train:   {args.fast_train}")
+    print(f"CPU Optimize: {cpu_optimized}")
     
     # Train
     if not args.compare_only:

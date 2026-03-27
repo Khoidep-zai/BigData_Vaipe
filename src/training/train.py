@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import random
+import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -310,14 +311,19 @@ def evaluate(
     device: torch.device,
     criterion: nn.Module,
     tta_views: int = 1,
+    progress_desc: Optional[str] = None,
 ) -> Tuple[float, float]:
     # Hàm đánh giá chung cho cả tập train (metric) và tập val.
     model.eval()
     correct, total = 0, 0
     running_loss = 0.0
     use_amp = device.type == "cuda"
+    iterator = loader
+    if progress_desc:
+        iterator = tqdm(loader, desc=progress_desc, leave=False)
+
     with torch.no_grad():
-        for images, labels, _ in loader:
+        for images, labels, _ in iterator:
             images = images.to(device, non_blocking=(device.type == "cuda"))
             labels = labels.to(device, non_blocking=(device.type == "cuda"))
             with torch.amp.autocast("cuda", enabled=use_amp):
@@ -630,12 +636,12 @@ def train(args: argparse.Namespace | None = None) -> None:
     for pg in optimizer.param_groups:
         pg["initial_lr"] = float(pg["lr"])
     base_lr = float(args.lr)
-    warmup_epochs = 2
-    # Warmup + cosine decay often stabilizes fine-tuning with pretrained backbones.
+    warmup_epochs = 3
+    # Warmup 3 epoch + cosine decay giúp head ổn định trước khi backbone bắt đầu unfreeze.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=max(2, int(args.epochs) - warmup_epochs),
-        eta_min=base_lr * 0.08,
+        eta_min=base_lr * 0.05,
     )
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     freeze_backbone_epochs = int(getattr(args, "freeze_backbone_epochs", 0))
@@ -708,7 +714,7 @@ def train(args: argparse.Namespace | None = None) -> None:
                 _set_backbone_trainable(model, args.model, trainable=True)
 
         if epoch <= warmup_epochs:
-            warmup_scale = 0.35 + 0.65 * (epoch / warmup_epochs)
+            warmup_scale = 0.25 + 0.75 * (epoch / warmup_epochs)
             for pg in optimizer.param_groups:
                 pg["lr"] = float(pg.get("initial_lr", pg["lr"])) * warmup_scale
 
@@ -773,42 +779,60 @@ def train(args: argparse.Namespace | None = None) -> None:
             ema_backup = ema.apply(model)
 
         if compute_full_train_metric:
+            train_eval_start = time.perf_counter()
+            print(f"[INFO] Eval train metric (epoch {epoch}, mode=full)")
             train_acc, _train_eval_loss = evaluate(
                 model,
                 train_metric_loader,
                 device,
                 criterion,
                 tta_views=1,
+                progress_desc=f"Eval train e{epoch}",
             )
+            print(f"[INFO] Eval train done in {time.perf_counter() - train_eval_start:.1f}s")
             train_metric_mode = "full"
             last_full_train_acc = float(train_acc)
         else:
             train_acc = approx_train_acc
             train_metric_mode = "approx"
 
+        val_quick_start = time.perf_counter()
+        print(
+            f"[INFO] Eval val quick (epoch {epoch}, tta_views={quick_val_tta_views})"
+        )
         val_acc_quick, val_loss_quick = evaluate(
             model,
             val_loader,
             device,
             criterion,
             tta_views=quick_val_tta_views,
+            progress_desc=f"Eval val quick e{epoch}",
         )
+        print(f"[INFO] Eval val quick done in {time.perf_counter() - val_quick_start:.1f}s")
         val_acc = float(val_acc_quick)
         val_loss = float(val_loss_quick)
         val_metric_mode = f"quick@{quick_val_tta_views}"
 
+        candidate_improved = val_acc_quick > (best_acc + 1e-4)
         if (
             full_tta_on_save
             and total_tta_views > quick_val_tta_views
-            and val_acc_quick > (best_acc + 1e-4)
+            and candidate_improved
+            and best_acc >= 0.0
         ):
+            val_full_start = time.perf_counter()
+            print(
+                f"[INFO] Eval val full (epoch {epoch}, tta_views={total_tta_views})"
+            )
             val_acc, val_loss = evaluate(
                 model,
                 val_loader,
                 device,
                 criterion,
                 tta_views=total_tta_views,
+                progress_desc=f"Eval val full e{epoch}",
             )
+            print(f"[INFO] Eval val full done in {time.perf_counter() - val_full_start:.1f}s")
             val_metric_mode = f"full@{total_tta_views}"
 
         if ema is not None and ema_backup is not None:
