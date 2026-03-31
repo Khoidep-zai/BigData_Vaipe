@@ -20,3 +20,18 @@ models/**/terminal_review_history.json
 /json/log/
 /json/
 
+# Dataset and large local data
+/data_aligned/
+/data/images/
+/data/csv/
+
+# Generated experiment outputs
+/models/AI/
+/models/results/
+/models/reports/latest/
+/log/
+
+# Local IDE/workspace files
+/.idea/
+/.vscode/
+
