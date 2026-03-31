@@ -9,3 +9,14 @@ models/**/confusion_matrix*.png
 models/**/evaluation_comparison*.png
 models/**/smoke_run.log
 models/**/terminal_review_history.json
+
+# Root-level temporary verification artifacts
+/.check_*.log
+/.check_*.json
+/.pytest_*.log
+/.prescription_match_*.log
+
+# Centralized runtime artifact folders
+/json/log/
+/json/
+

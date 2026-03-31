@@ -19,6 +19,11 @@ from ..data.data_setup import discover_or_prepare_data_dir
 from ..data.features import PillImageDataset, build_transforms
 from ..models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
 from ..training.train import train as train_one_model
+from ..utils.model_paths import (
+    model_artifact_dir,
+    resolve_model_artifact_path,
+    resolve_model_checkpoint_path,
+)
 
 DEFAULT_MODELS = ["resnet50", "efficientnet_b0", "vit_b_16"]
 
@@ -168,8 +173,8 @@ def _evaluate_ensemble(
     y_true_idx: Optional[torch.Tensor] = None
 
     for model_name in model_names:
-        ckpt_path = models_dir / f"{model_name}_epillid_best.pt"
-        if not ckpt_path.exists():
+        ckpt_path = resolve_model_checkpoint_path(base_output_dir=models_dir, model_name=model_name)
+        if ckpt_path is None:
             continue
 
         ckpt_class_to_idx = load_checkpoint_class_to_idx(str(ckpt_path), map_location=device)
@@ -184,8 +189,12 @@ def _evaluate_ensemble(
 
         inv_pred = {v: k for k, v in (ckpt_class_to_idx or dataset_class_to_idx).items()}
 
-        metrics_path = models_dir / f"{model_name}_epillid_best.metrics.json"
-        metrics = _safe_load_metrics(metrics_path)
+        metrics_path = resolve_model_artifact_path(
+            base_output_dir=models_dir,
+            model_name=model_name,
+            suffix="_epillid_best.metrics.json",
+        )
+        metrics = _safe_load_metrics(metrics_path) if metrics_path is not None else {}
         weight = float(metrics.get("best_val_acc", 1.0))
         if weight <= 0:
             weight = 1.0
@@ -315,7 +324,7 @@ def _plot_confusion_matrix(
                 ax.text(
                     j,
                     i,
-                    int(cm[i, j]),
+                    str(int(cm[i, j])),
                     ha="center",
                     va="center",
                     color="white" if cm[i, j] > threshold else "black",
@@ -345,14 +354,39 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument(
+        "--eval-batch-size",
+        type=int,
+        default=0,
+        help="Evaluation batch size (0 = auto)",
+    )
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--label-smoothing", type=float, default=0.1)
     parser.add_argument("--mixup-alpha", type=float, default=0.2)
+    parser.add_argument(
+        "--augment-profile",
+        type=str,
+        default="default",
+        choices=["default", "lab6_stable"],
+        help="Train augmentation profile. 'lab6_stable' adapts Lab6-style regularization.",
+    )
+    parser.add_argument(
+        "--vector-grayscale-prob",
+        type=float,
+        default=0.0,
+        help="Probability of grayscale augmentation during train (Lab6 vector-inspired).",
+    )
     parser.add_argument("--backbone-lr-scale", type=float, default=0.2)
     parser.add_argument("--ema-decay", type=float, default=0.997)
     parser.add_argument("--tta-views", type=int, default=3)
     parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 2)
+    parser.add_argument(
+        "--eval-num-workers",
+        type=int,
+        default=0,
+        help="Evaluation DataLoader workers (0 = use num-workers)",
+    )
     parser.add_argument(
         "--device",
         type=str,
@@ -395,7 +429,13 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
     data_dir = discover_data_dir(args.data_dir, seed=int(getattr(args, "seed", 42)))
     test_dir = str(Path(data_dir) / "test")
     models_dir = Path(args.output_dir)
-    report_dir = Path(args.report_dir)
+    report_dir_arg = str(getattr(args, "report_dir", "models/reports/latest")).strip()
+    if not report_dir_arg:
+        report_dir = models_dir / "reports" / "latest"
+    elif report_dir_arg == "models/reports/latest" and models_dir != Path("models"):
+        report_dir = models_dir / "reports" / "latest"
+    else:
+        report_dir = Path(report_dir_arg)
     models_dir.mkdir(parents=True, exist_ok=True)
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -409,6 +449,7 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
     trained_models: List[str] = []
     for idx, model_name in enumerate(model_names, start=1):
         _stage(2, total_stages, f"[{idx}/{len(model_names)}] Dang train mo hinh: {model_name}")
+        model_output_dir = model_artifact_dir(models_dir, model_name)
         train_args = argparse.Namespace(
             data_dir=data_dir,
             model=model_name,
@@ -418,6 +459,8 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
             weight_decay=args.weight_decay,
             label_smoothing=float(getattr(args, "label_smoothing", 0.1)),
             mixup_alpha=float(getattr(args, "mixup_alpha", 0.2)),
+            augment_profile=str(getattr(args, "augment_profile", "default")),
+            vector_grayscale_prob=float(getattr(args, "vector_grayscale_prob", 0.0)),
             backbone_lr_scale=float(getattr(args, "backbone_lr_scale", 0.2)),
             ema_decay=float(getattr(args, "ema_decay", 0.997)),
             tta_views=int(getattr(args, "tta_views", 3)),
@@ -427,18 +470,19 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
             deterministic=bool(getattr(args, "deterministic", False)),
             num_workers=args.num_workers,
             device=device_name,
-            output_dir=str(models_dir),
+            output_dir=str(model_output_dir),
             early_stop_patience=args.early_stop_patience,
             save_curves=args.save_curves,
             pretrained=args.pretrained,
         )
         train_one_model(train_args)
 
-        ckpt = models_dir / f"{model_name}_epillid_best.pt"
-        if ckpt.exists():
+        ckpt = resolve_model_checkpoint_path(base_output_dir=models_dir, model_name=model_name)
+        if ckpt is not None and ckpt.exists():
             trained_models.append(model_name)
         else:
-            print(f"[CANH_BAO] Khong tim thay checkpoint sau train: {ckpt}", flush=True)
+            expected_ckpt = model_output_dir / f"{model_name}_epillid_best.pt"
+            print(f"[CANH_BAO] Khong tim thay checkpoint sau train: {expected_ckpt}", flush=True)
 
     if not trained_models:
         raise RuntimeError("Training finished but no checkpoints were produced.")
@@ -446,13 +490,34 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
     # Stage 3: evaluate each model and weighted ensemble.
     _stage(3, total_stages, "Danh gia toan bo mo hinh da train va ensemble co trong so")
     device = torch.device(device_name)
-    dataset, loader = _build_loader(Path(test_dir), batch_size=args.batch_size, num_workers=args.num_workers)
+    eval_batch_size = int(getattr(args, "eval_batch_size", 0))
+    if eval_batch_size <= 0:
+        eval_batch_size = max(32, int(args.batch_size) * 4) if device_name == "cpu" else max(16, int(args.batch_size))
+
+    eval_num_workers = int(getattr(args, "eval_num_workers", 0))
+    if eval_num_workers <= 0:
+        eval_num_workers = int(args.num_workers)
+    eval_num_workers = max(0, eval_num_workers)
+
+    _stage(
+        3,
+        total_stages,
+        f"Cau hinh evaluate: batch_size={eval_batch_size}, num_workers={eval_num_workers}",
+    )
+    dataset, loader = _build_loader(
+        Path(test_dir),
+        batch_size=eval_batch_size,
+        num_workers=eval_num_workers,
+    )
 
     eval_rows: List[ModelEvalResult] = []
     pred_cache: Dict[str, Tuple[List[str], List[str]]] = {}
 
     for model_name in trained_models:
-        ckpt = models_dir / f"{model_name}_epillid_best.pt"
+        ckpt = resolve_model_checkpoint_path(base_output_dir=models_dir, model_name=model_name)
+        if ckpt is None:
+            print(f"[CANH_BAO] Bo qua evaluate do khong tim thay checkpoint: {model_name}", flush=True)
+            continue
         row, y_true, y_pred = _evaluate_single_model(
             model_name=model_name,
             checkpoint_path=ckpt,
@@ -463,6 +528,9 @@ def run_pipeline(args: argparse.Namespace | None = None) -> PipelineSummary:
         eval_rows.append(row)
         pred_cache[model_name] = (y_true, y_pred)
         _stage(3, total_stages, f"Da danh gia {model_name}: acc={row.accuracy:.4f}, macro_f1={row.macro_f1:.4f}")
+
+    if not eval_rows:
+        raise RuntimeError("Khong tim thay checkpoint hop le de evaluate sau khi train.")
 
     ensemble_row, y_true_ens, y_pred_ens = _evaluate_ensemble(
         model_names=trained_models,

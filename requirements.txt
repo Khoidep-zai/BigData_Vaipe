@@ -45,6 +45,10 @@ scikit-learn>=1.3.0
 # Used for: Training progress bar (epochs, batches), data loading progress
 tqdm>=4.66.0
 
+# --- TESTING ---
+# pytest: Unit testing framework used by tests/ suite
+pytest>=8.0.0
+
 # =============================================================================
 # OPTIONAL (Recommended for Advanced Users)
 # Uncomment if needed:

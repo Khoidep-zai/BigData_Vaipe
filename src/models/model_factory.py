@@ -26,6 +26,19 @@ MODEL_BUILDERS: Dict[str, ModelBuilder] = {
 }
 
 
+def _normalize_legacy_state_dict(model_name: str, state_dict: dict) -> dict:
+    """Normalize known legacy key layouts before strict loading."""
+    if model_name != "vit_b_16":
+        return state_dict
+
+    # Older ViT checkpoints used a direct Linear head at `heads.head.*`.
+    if "heads.head.weight" in state_dict and "heads.head.1.weight" not in state_dict:
+        state_dict["heads.head.1.weight"] = state_dict.pop("heads.head.weight")
+    if "heads.head.bias" in state_dict and "heads.head.1.bias" not in state_dict:
+        state_dict["heads.head.1.bias"] = state_dict.pop("heads.head.bias")
+    return state_dict
+
+
 def create_model(
     model_name: str,
     num_classes: int,
@@ -65,6 +78,9 @@ def load_checkpoint(
     # Hỗ trợ nạp cả 2 dạng file: chỉ chứa trọng số (state_dict) hoặc trọn bộ checkpoint (bao gồm cả optimizer, epoch...).
     state = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
     state_dict = state["model_state_dict"] if isinstance(state, dict) and "model_state_dict" in state else state
+    if not isinstance(state_dict, dict):
+        raise ValueError(f"Unsupported checkpoint format at: {checkpoint_path}")
+    state_dict = _normalize_legacy_state_dict(model_name=model_name, state_dict=state_dict)
 
     resolved_num_classes = num_classes
     if isinstance(state, dict):
@@ -78,8 +94,11 @@ def load_checkpoint(
             resolved_num_classes = int(state_dict["fc.bias"].shape[0])
         elif model_name == "efficientnet_b0" and "classifier.1.bias" in state_dict:
             resolved_num_classes = int(state_dict["classifier.1.bias"].shape[0])
-        elif model_name == "vit_b_16" and "heads.head.bias" in state_dict:
-            resolved_num_classes = int(state_dict["heads.head.bias"].shape[0])
+        elif model_name == "vit_b_16":
+            if "heads.head.1.bias" in state_dict:
+                resolved_num_classes = int(state_dict["heads.head.1.bias"].shape[0])
+            elif "heads.head.bias" in state_dict:
+                resolved_num_classes = int(state_dict["heads.head.bias"].shape[0])
 
     if resolved_num_classes is None:
         raise ValueError("Cannot resolve num_classes from checkpoint and input arguments.")

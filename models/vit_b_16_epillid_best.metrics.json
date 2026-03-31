@@ -1,9 +1,0 @@
-{
-  "best_val_acc": 0.5,
-  "epochs": 5,
-  "model": "vit_b_16",
-  "lr": 8e-05,
-  "weight_decay": 0.0015,
-  "label_smoothing": 0.22,
-  "mixup_alpha": 0.45
-}

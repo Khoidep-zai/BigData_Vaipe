@@ -133,6 +133,19 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="When quick validation improves, re-evaluate candidate with full TTA before checkpointing.",
     )
+    parser.add_argument(
+        "--augment-profile",
+        type=str,
+        default="default",
+        choices=["default", "lab6_stable"],
+        help="Augmentation profile for train split. 'lab6_stable' adapts Lab6-style recipe.",
+    )
+    parser.add_argument(
+        "--vector-grayscale-prob",
+        type=float,
+        default=0.0,
+        help="Probability to apply grayscale augmentation (Lab6-inspired shape-focused training).",
+    )
     return parser.parse_args()
 
 
@@ -166,12 +179,21 @@ def create_dataloaders(
     seed: int = 42,
     validation_split: float = 0.15,
     min_val_samples: int = 24,
+    augment_profile: str = "default",
+    vector_grayscale_prob: float = 0.0,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     # Tạo 3 bộ nạp dữ liệu (DataLoader): train (có biến đổi ảnh), val (cố định), và train-metric (train không biến đổi để đo chỉ số).
     train_root = os.path.join(data_dir, "train")
     val_root = os.path.join(data_dir, "val")
 
-    train_ds = PillImageDataset(train_root, transform=build_transforms(train=True))
+    train_ds = PillImageDataset(
+        train_root,
+        transform=build_transforms(
+            train=True,
+            profile=str(augment_profile),
+            grayscale_prob=float(vector_grayscale_prob),
+        ),
+    )
     train_eval_ds = PillImageDataset(
         train_root,
         transform=build_transforms(train=False),
@@ -400,6 +422,13 @@ def _split_parameter_groups(
     ]
 
 
+def _dataset_len(dataset: object) -> int:
+    try:
+        return int(len(dataset))
+    except Exception:
+        return 0
+
+
 def _plot_training_curves(history: Dict[str, List[float]], output_path: str) -> None:
     import matplotlib.pyplot as plt
 
@@ -574,6 +603,8 @@ def train(args: argparse.Namespace | None = None) -> None:
         seed=int(getattr(args, "seed", 42)),
         validation_split=float(getattr(args, "validation_split", 0.15)),
         min_val_samples=int(getattr(args, "min_val_samples", 24)),
+        augment_profile=str(getattr(args, "augment_profile", "default")),
+        vector_grayscale_prob=float(getattr(args, "vector_grayscale_prob", 0.0)),
     )
 
     class_to_idx = _resolve_class_to_idx(train_loader.dataset)
@@ -591,8 +622,8 @@ def train(args: argparse.Namespace | None = None) -> None:
 
     label_smoothing = float(getattr(args, "label_smoothing", 0.1))
     mixup_alpha = float(getattr(args, "mixup_alpha", 0.2))
-    n_train = len(train_loader.dataset)
-    n_val = len(val_loader.dataset)
+    n_train = _dataset_len(train_loader.dataset)
+    n_val = _dataset_len(val_loader.dataset)
 
     # Gap guard is tuned differently for tiny datasets where metrics are noisier.
     max_large_gap_epochs = 2
@@ -615,7 +646,9 @@ def train(args: argparse.Namespace | None = None) -> None:
         f"train_samples={n_train} val_samples={n_val} "
         f"train_batches={len(train_loader)} val_batches={len(val_loader)} "
         f"label_smoothing={label_smoothing:.3f} mixup_alpha={mixup_alpha:.3f} "
-        f"lr={float(args.lr):.6f} freeze_backbone_epochs={int(getattr(args, 'freeze_backbone_epochs', 0))}"
+        f"lr={float(args.lr):.6f} freeze_backbone_epochs={int(getattr(args, 'freeze_backbone_epochs', 0))} "
+        f"augment_profile={str(getattr(args, 'augment_profile', 'default'))} "
+        f"vector_grayscale_prob={float(getattr(args, 'vector_grayscale_prob', 0.0)):.2f}"
     )
     criterion = nn.CrossEntropyLoss(
         weight=class_weight_tensor,
@@ -716,7 +749,10 @@ def train(args: argparse.Namespace | None = None) -> None:
         if epoch <= warmup_epochs:
             warmup_scale = 0.25 + 0.75 * (epoch / warmup_epochs)
             for pg in optimizer.param_groups:
-                pg["lr"] = float(pg.get("initial_lr", pg["lr"])) * warmup_scale
+                base_group_lr = pg.get("initial_lr")
+                if not isinstance(base_group_lr, (int, float)):
+                    base_group_lr = pg.get("lr", base_lr)
+                pg["lr"] = float(base_group_lr) * warmup_scale
 
         model.train()
         running_loss = 0.0
@@ -765,7 +801,7 @@ def train(args: argparse.Namespace | None = None) -> None:
             running_total += labels.size(0)
             pbar.set_postfix(mat_mat=loss.item())
 
-        epoch_loss = running_loss / max(len(train_loader.dataset), 1)
+        epoch_loss = running_loss / max(n_train, 1)
         # Use fast approximate train metric most epochs; run exact clean-train evaluation periodically.
         approx_train_acc = float(running_correct / max(running_total, 1))
         compute_full_train_metric = (
@@ -861,7 +897,7 @@ def train(args: argparse.Namespace | None = None) -> None:
                 "[DIAG] "
                 f"epoch={epoch} lr_before={prev_lr:.8f} lr_after={next_lr:.8f} "
                 f"grad_norm_avg={avg_grad_norm:.6f} grad_norm_max={epoch_grad_norm_max:.6f} "
-                f"batches={epoch_batches} train_samples={running_total} val_samples={len(val_loader.dataset)}"
+                f"batches={epoch_batches} train_samples={running_total} val_samples={n_val}"
             )
             if next_lr != prev_lr:
                 print(

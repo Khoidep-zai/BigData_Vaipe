@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 from PIL import Image
@@ -7,6 +8,7 @@ from PIL import Image
 from src.data.data_setup import (
     build_thuoc_data_from_vaipe,
     clean_metadata_csv_for_vectors,
+    prepare_metadata_artifacts,
 )
 
 
@@ -71,10 +73,32 @@ def test_clean_metadata_csv_for_vectors(tmp_path: Path):
     )
 
     summary = clean_metadata_csv_for_vectors(input_csv, output_csv)
-    out_df = pd.read_csv(output_csv, encoding="utf-8-sig")
+    out_df = cast(pd.DataFrame, pd.read_csv(output_csv, encoding="utf-8-sig"))
 
     assert summary["rows_in"] == 3
     assert summary["rows_out"] == 1
     assert "Manufacturer" not in out_df.columns
     assert "Medicine Name" in out_df.columns
     assert "Composition" in out_df.columns
+
+
+def test_prepare_metadata_artifacts_supports_data_csv_layout(tmp_path: Path):
+    data_root = tmp_path / "data"
+    csv_root = data_root / "csv"
+    csv_root.mkdir(parents=True, exist_ok=True)
+
+    raw_csv = csv_root / "Medicine_Details_Deeplearning.csv"
+    raw_csv.write_text(
+        "Medicine Name,Composition,VAIPE2022_Class_ID,Dosage_Form,Weight,Length_mm,Width_mm,Height_mm,Color_For_AI,Shape_For_AI,Active_Ingredient_Group,Disease_Treated_VI\n"
+        "Drug A,Comp A,0,Tablet,10x10x4,10,10,4,White,Round,Group A,Disease A\n",
+        encoding="utf-8",
+    )
+
+    summary = prepare_metadata_artifacts(data_root=data_root)
+
+    assert summary is not None
+    clean_csv = csv_root / "Medicine_Details_Training.csv"
+    vector_csv = csv_root / "Medicine_Details_Training_vectors.csv"
+    assert clean_csv.exists()
+    assert vector_csv.exists()
+

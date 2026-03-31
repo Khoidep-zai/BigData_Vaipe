@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as T
@@ -18,53 +18,105 @@ IMG_SIZE = 224
 VALID_EXTS = (".jpg", ".jpeg", ".png")
 
 
-def build_transforms(train: bool = True) -> T.Compose:
-    # Giữ các bước tiền xử lý ảnh nhất quán với chuẩn của các mô hình đã huấn luyện sẵn trên ImageNet.
-    if train:
-        return T.Compose(
+def _default_train_transforms() -> T.Compose:
+    return T.Compose(
+        [
+            # Cắt ngẫu nhiên vùng ảnh rồi scale lên 224×224 → tăng đa dạng vị trí và kích thước viên thuốc.
+            T.RandomResizedCrop(
+                (IMG_SIZE, IMG_SIZE),
+                scale=(0.68, 1.0),
+                ratio=(0.85, 1.15),
+                interpolation=InterpolationMode.BICUBIC,
+                antialias=True,
+            ),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomVerticalFlip(p=0.15),
+            # ColorJitter mô phỏng ánh sáng và nền khác nhau khi chụp thuốc.
+            T.RandomApply(
+                [
+                    T.ColorJitter(
+                        brightness=0.15,
+                        contrast=0.15,
+                        saturation=0.12,
+                        hue=0.03,
+                    )
+                ],
+                p=0.7,
+            ),
+            T.RandomAffine(
+                degrees=10,
+                translate=(0.08, 0.08),
+                scale=(0.90, 1.10),
+                interpolation=InterpolationMode.BILINEAR,
+            ),
+            T.RandomPerspective(distortion_scale=0.15, p=0.25),
+            # GaussianBlur mô phỏng ảnh thuốc bị mờ do camera không focus.
+            T.RandomApply([T.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))], p=0.2),
+            # RandomAdjustSharpness mô phỏng camera có chất lượng sắc nét khác nhau.
+            T.RandomAdjustSharpness(sharpness_factor=1.5, p=0.2),
+            T.ToTensor(),
+            # RandomErasing che một phần ảnh → buộc model nhìn nhiều vùng đặc trưng hơn.
+            T.RandomErasing(p=0.25, scale=(0.02, 0.12), ratio=(0.3, 3.3), value="random"),
+            T.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ]
+    )
+
+
+def _lab6_stable_train_transforms(grayscale_prob: float = 0.0) -> T.Compose:
+    # Lab6-inspired stable recipe: nhẹ hơn profile mặc định để train/val mượt hơn trên dữ liệu nhỏ.
+    g_prob = float(max(0.0, min(1.0, grayscale_prob)))
+    transforms: List[object] = [
+        T.RandomResizedCrop(
+            (IMG_SIZE, IMG_SIZE),
+            scale=(0.78, 1.0),
+            ratio=(0.90, 1.10),
+            interpolation=InterpolationMode.BICUBIC,
+            antialias=True,
+        ),
+        T.RandomHorizontalFlip(p=0.5),
+        T.RandomRotation(15, interpolation=InterpolationMode.BILINEAR),
+        T.RandomApply(
             [
-                # Cắt ngẫu nhiên vùng ảnh rồi scale lên 224×224 → tăng đa dạng vị trí và kích thước viên thuốc.
-                T.RandomResizedCrop(
-                    (IMG_SIZE, IMG_SIZE),
-                    scale=(0.68, 1.0),
-                    ratio=(0.85, 1.15),
-                    interpolation=InterpolationMode.BICUBIC,
-                    antialias=True,
-                ),
-                T.RandomHorizontalFlip(p=0.5),
-                T.RandomVerticalFlip(p=0.15),
-                # ColorJitter mô phỏng ánh sáng và nền khác nhau khi chụp thuốc.
-                T.RandomApply(
-                    [
-                        T.ColorJitter(
-                            brightness=0.15,
-                            contrast=0.15,
-                            saturation=0.12,
-                            hue=0.03,
-                        )
-                    ],
-                    p=0.7,
-                ),
-                T.RandomAffine(
-                    degrees=10,
-                    translate=(0.08, 0.08),
-                    scale=(0.90, 1.10),
-                    interpolation=InterpolationMode.BILINEAR,
-                ),
-                T.RandomPerspective(distortion_scale=0.15, p=0.25),
-                # GaussianBlur mô phỏng ảnh thuốc bị mờ do camera không focus.
-                T.RandomApply([T.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))], p=0.2),
-                # RandomAdjustSharpness mô phỏng camera có chất lượng sắc nét khác nhau.
-                T.RandomAdjustSharpness(sharpness_factor=1.5, p=0.2),
-                T.ToTensor(),
-                # RandomErasing che một phần ảnh → buộc model nhìn nhiều vùng đặc trưng hơn.
-                T.RandomErasing(p=0.25, scale=(0.02, 0.12), ratio=(0.3, 3.3), value="random"),
-                T.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225],
-                ),
-            ]
-        )
+                T.ColorJitter(
+                    brightness=0.10,
+                    contrast=0.10,
+                    saturation=0.08,
+                    hue=0.02,
+                )
+            ],
+            p=0.35,
+        ),
+    ]
+    if g_prob > 0:
+        # Kỹ thuật vector grayscale từ Lab6 được đưa vào augment để mô hình học hình dạng ổn định hơn.
+        transforms.append(T.RandomApply([T.RandomGrayscale(p=1.0)], p=g_prob))
+
+    transforms.extend(
+        [
+            T.ToTensor(),
+            T.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ]
+    )
+    return T.Compose(transforms)
+
+
+def build_transforms(
+    train: bool = True,
+    profile: str = "default",
+    grayscale_prob: float = 0.0,
+) -> T.Compose:
+    # Giữ các bước tiền xử lý ảnh nhất quán với chuẩn của các mô hình đã huấn luyện sẵn trên ImageNet.
+    profile_name = (profile or "default").strip().lower()
+    if train:
+        if profile_name == "lab6_stable":
+            return _lab6_stable_train_transforms(grayscale_prob=grayscale_prob)
+        return _default_train_transforms()
     else:
         return T.Compose(
             [
@@ -157,7 +209,7 @@ class PillImageDataset(Dataset):
                     path = os.path.join(cls_dir, fname)
                     self.samples.append(ImageSample(path=path, label=cls_idx))
 
-        return class_to_idx
+        return class_to_idx if class_to_idx is not None else {}
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -268,10 +320,10 @@ def image_to_numeric_vector(img: Image.Image, thumbnail_size: int = 16) -> np.nd
     hsv_hist = _compute_hsv_histogram(img_focused, bins=8)
 
     # Edge density (1 chiều) → phản ánh chi tiết bề mặt
-    edge_density = np.array([_compute_edge_density(gray_arr)], dtype=np.float32)
+    edge_density = np.asarray([_compute_edge_density(gray_arr)], dtype=np.float32)
 
     # Quadrant luminance (4 chiều) → phân biệt thuốc hai tông
-    quad_lum = _compute_quadrant_luminance(gray_arr)
+    quad_lum = np.asarray(_compute_quadrant_luminance(gray_arr), dtype=np.float32)
 
     # Brightness và contrast bổ sung (2 chiều)
     brightness = float(gray_arr.mean())
@@ -281,7 +333,7 @@ def image_to_numeric_vector(img: Image.Image, thumbnail_size: int = 16) -> np.nd
     # Thumbnail flatten (thumbnail_size^2 chiều)
     thumb = img_focused.convert("L").resize(
         (thumbnail_size, thumbnail_size),
-        resample=Image.BILINEAR,
+        resample=Image.Resampling.BILINEAR,
     )
     thumb_flat = (np.array(thumb, dtype=np.float32) / 255.0).reshape(-1)
 

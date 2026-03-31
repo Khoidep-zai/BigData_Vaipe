@@ -16,6 +16,11 @@ from tqdm import tqdm
 from src.data.features import PillImageDataset, build_transforms
 from src.models.model_factory import load_checkpoint, load_checkpoint_class_to_idx
 from src.training.train import train as train_one_model
+from src.utils.model_paths import (
+    model_artifact_dir,
+    resolve_model_artifact_path,
+    resolve_model_checkpoint_path,
+)
 
 DEFAULT_MODELS = ["resnet50", "efficientnet_b0", "vit_b_16"]
 
@@ -44,7 +49,13 @@ def resolve_device(device: str) -> torch.device:
 
 def load_weight_from_metrics(models_dir: Path, model_name: str) -> float:
     # Quyết định trọng số cho Ensemble gộp: dựa trên độ chính xác (Accuracy) tốt nhất của từng mô hình trên tập Val.
-    metrics_path = models_dir / f"{model_name}_epillid_best.metrics.json"
+    metrics_path = resolve_model_artifact_path(
+        base_output_dir=models_dir,
+        model_name=model_name,
+        suffix="_epillid_best.metrics.json",
+    )
+    if metrics_path is None:
+        return 1.0
     if not metrics_path.exists():
         return 1.0
     try:
@@ -62,7 +73,7 @@ def evaluate_single_model(
     loader: DataLoader,
     dataset_class_to_idx: Dict[str, int],
     device: torch.device,
-) -> Tuple[Dict[str, float], List[str], List[str]]:
+) -> tuple[Dict[str, float], List[str], List[str]]:
     # Đánh giá một checkpoint, trả về cả chỉ số tổng hợp (Accuracy, F1) và danh sách nhãn dự đoán chi tiết.
     ckpt_class_to_idx = load_checkpoint_class_to_idx(str(checkpoint_path), map_location=device)
     num_classes = len(ckpt_class_to_idx) if ckpt_class_to_idx else len(dataset_class_to_idx)
@@ -96,11 +107,10 @@ def evaluate_single_model(
     acc = float(accuracy_score(y_true, y_pred))
     macro_f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
 
-    row = {
-        "model": model_name,
+    row: Dict[str, float] = {
         "accuracy": acc,
         "macro_f1": macro_f1,
-        "num_samples": int(len(y_true)),
+        "num_samples": float(len(y_true)),
     }
     return row, y_true, y_pred
 
@@ -117,8 +127,8 @@ def evaluate_weighted_ensemble(
 
     loaded = []
     for model_name in model_names:
-        ckpt = models_dir / f"{model_name}_epillid_best.pt"
-        if not ckpt.exists():
+        ckpt = resolve_model_checkpoint_path(base_output_dir=models_dir, model_name=model_name)
+        if ckpt is None:
             continue
 
         ckpt_class_to_idx = load_checkpoint_class_to_idx(str(ckpt), map_location=device)
@@ -164,10 +174,9 @@ def evaluate_weighted_ensemble(
     macro_f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
 
     return {
-        "model": "ensemble_weighted",
         "accuracy": acc,
         "macro_f1": macro_f1,
-        "num_samples": int(len(y_true)),
+        "num_samples": float(len(y_true)),
     }
 
 
@@ -186,7 +195,7 @@ def blended_score(acc: float, macro_f1: float) -> float:
     return 0.6 * acc + 0.4 * macro_f1
 
 
-def print_table(rows: List[Dict[str, float]]) -> None:
+def print_table(rows: List[Dict[str, object]]) -> None:
     # Render fixed-width terminal table to compare models quickly without plots.
     headers = ["model", "accuracy", "macro_f1", "blend", "num_samples", "verdict"]
 
@@ -276,8 +285,8 @@ def propose_next_hparams(
     if len(history) < 2:
         return current_lr, current_weight_decay, current_epochs
 
-    prev_score = float(history[-2].get("best_blend", 0.0))
-    last_score = float(history[-1].get("best_blend", 0.0))
+    prev_score = float(str(history[-2].get("best_blend", 0.0)))
+    last_score = float(str(history[-1].get("best_blend", 0.0)))
 
     # Nếu vòng gần nhất tốt lên, fine-tune nhẹ để ổn định hơn.
     if last_score >= prev_score:
@@ -305,6 +314,8 @@ def train_all_models(
     num_workers: int,
     early_stop_patience: int,
     pretrained: bool,
+    augment_profile: str = "default",
+    vector_grayscale_prob: float = 0.0,
 ) -> None:
     # Sequentially train each requested backbone using a shared hyperparameter set per round.
     for idx, model_name in enumerate(model_names, start=1):
@@ -320,6 +331,8 @@ def train_all_models(
             batch_size=batch_size,
             lr=lr,
             weight_decay=weight_decay,
+            augment_profile=augment_profile,
+            vector_grayscale_prob=vector_grayscale_prob,
             num_workers=num_workers,
             device=device,
             output_dir=str(models_dir),
@@ -420,6 +433,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--augment-profile",
+        type=str,
+        default="default",
+        choices=["default", "lab6_stable"],
+        help="Train augmentation profile during review rounds.",
+    )
+    parser.add_argument(
+        "--vector-grayscale-prob",
+        type=float,
+        default=0.0,
+        help="Probability of grayscale augmentation during review training rounds.",
+    )
     parser.add_argument("--early-stop-patience", type=int, default=5)
     parser.add_argument("--rounds", type=int, default=1, help="Số vòng train + review")
     parser.add_argument(
@@ -504,7 +530,7 @@ def main_with_args(args: argparse.Namespace) -> None:
     cur_wd = float(args.weight_decay)
     cur_epochs = int(args.epochs)
 
-    final_rows: List[Dict[str, float]] = []
+    final_rows: List[Dict[str, object]] = []
     for round_idx in range(1, max(1, int(args.rounds)) + 1):
         print(
             f"\n[THOI_GIAN_THUC][VONG {round_idx}/{max(1, int(args.rounds))}] "
@@ -523,16 +549,19 @@ def main_with_args(args: argparse.Namespace) -> None:
                 batch_size=args.batch_size,
                 lr=cur_lr,
                 weight_decay=cur_wd,
+                augment_profile=str(getattr(args, "augment_profile", "default")),
+                vector_grayscale_prob=float(getattr(args, "vector_grayscale_prob", 0.0)),
                 num_workers=args.num_workers,
                 early_stop_patience=args.early_stop_patience,
                 pretrained=args.pretrained,
             )
 
-        rows: List[Dict[str, float]] = []
+        rows: List[Dict[str, object]] = []
         for model_name in model_names:
-            ckpt = models_dir / f"{model_name}_epillid_best.pt"
-            if not ckpt.exists():
-                print(f"[CANH_BAO] Bo qua {model_name}: thiếu checkpoint {ckpt}", flush=True)
+            ckpt = resolve_model_checkpoint_path(base_output_dir=models_dir, model_name=model_name)
+            if ckpt is None:
+                expected = model_artifact_dir(models_dir, model_name) / f"{model_name}_epillid_best.pt"
+                print(f"[CANH_BAO] Bo qua {model_name}: thiếu checkpoint {expected}", flush=True)
                 continue
 
             row, _y_true, _y_pred = evaluate_single_model(
@@ -542,9 +571,9 @@ def main_with_args(args: argparse.Namespace) -> None:
                 dataset_class_to_idx=dataset.class_to_idx,
                 device=device,
             )
-            rows.append(row)
+            rows.append({"model": model_name, **row})
             print(
-                f"[XONG] {model_name}: accuracy={row['accuracy']:.4f}, macro_f1={row['macro_f1']:.4f}",
+                f"[XONG] {model_name}: accuracy={float(row['accuracy']):.4f}, macro_f1={float(row['macro_f1']):.4f}",
                 flush=True,
             )
 
@@ -559,9 +588,9 @@ def main_with_args(args: argparse.Namespace) -> None:
                 dataset_class_to_idx=dataset.class_to_idx,
                 device=device,
             )
-            rows.append(ens_row)
+            rows.append({"model": "ensemble_weighted", **ens_row})
             print(
-                f"[XONG] ensemble_weighted: accuracy={ens_row['accuracy']:.4f}, macro_f1={ens_row['macro_f1']:.4f}",
+                f"[XONG] ensemble_weighted: accuracy={float(ens_row['accuracy']):.4f}, macro_f1={float(ens_row['macro_f1']):.4f}",
                 flush=True,
             )
 

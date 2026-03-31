@@ -82,10 +82,19 @@ def is_valid_dataset_root(root: Path) -> bool:
     return train_classes == val_classes == test_classes
 
 
+def _resolve_vaipe_raw_root(raw_root: Path) -> Optional[Path]:
+    """Resolve VAIPE raw root for both legacy and nested layouts."""
+    candidates = [raw_root, raw_root / "images"]
+    for candidate in candidates:
+        image_dir = candidate / "public_train" / "pill" / "image"
+        label_dir = candidate / "public_train" / "pill" / "label"
+        if image_dir.exists() and label_dir.exists():
+            return candidate
+    return None
+
+
 def has_vaipe_training_data(raw_root: Path) -> bool:
-    image_dir = raw_root / "public_train" / "pill" / "image"
-    label_dir = raw_root / "public_train" / "pill" / "label"
-    return image_dir.exists() and label_dir.exists()
+    return _resolve_vaipe_raw_root(raw_root) is not None
 
 
 def _find_image_for_label(image_dir: Path, stem: str) -> Optional[Path]:
@@ -157,8 +166,12 @@ def _collect_vaipe_samples(
     crop_margin: float,
     min_crop_size: int,
 ) -> Tuple[Dict[int, List[CropSample]], Dict[str, int]]:
-    image_dir = raw_root / "public_train" / "pill" / "image"
-    label_dir = raw_root / "public_train" / "pill" / "label"
+    resolved_raw_root = _resolve_vaipe_raw_root(raw_root)
+    if resolved_raw_root is None:
+        raise FileNotFoundError(f"Khong tim thay du lieu VAIPE train hop le tai: {raw_root}")
+
+    image_dir = resolved_raw_root / "public_train" / "pill" / "image"
+    label_dir = resolved_raw_root / "public_train" / "pill" / "label"
 
     by_class: Dict[int, List[CropSample]] = {}
     stats = {
@@ -246,13 +259,14 @@ def build_thuoc_data_from_vaipe(
     raw_root = Path(raw_root)
     output_root = Path(output_root)
 
-    if not has_vaipe_training_data(raw_root):
+    resolved_raw_root = _resolve_vaipe_raw_root(raw_root)
+    if resolved_raw_root is None:
         raise FileNotFoundError(
             f"Khong tim thay du lieu VAIPE train hop le tai: {raw_root}"
         )
 
     samples_by_class, collect_stats = _collect_vaipe_samples(
-        raw_root=raw_root,
+        raw_root=resolved_raw_root,
         crop_margin=float(crop_margin),
         min_crop_size=int(min_crop_size),
     )
@@ -360,7 +374,8 @@ def build_thuoc_data_from_vaipe(
 
     summary: Dict[str, object] = {
         "source": "VAIPE public_train pill detection labels",
-        "raw_root": str(raw_root),
+        "raw_root": str(resolved_raw_root),
+        "raw_root_input": str(raw_root),
         "output_root": str(output_root),
         "num_classes": len(classes),
         "num_samples": {
@@ -458,12 +473,28 @@ def prepare_metadata_artifacts(
     text_dim: int = 32,
 ) -> Optional[Dict[str, object]]:
     data_root = Path(data_root)
-    input_csv = data_root / raw_csv_name
+
+    # Support both legacy layout (data/*.csv) and current layout (data/csv/*.csv).
+    candidate_roots = [data_root]
+    csv_subdir = data_root / "csv"
+    if csv_subdir not in candidate_roots:
+        candidate_roots.append(csv_subdir)
+
+    resolved_root: Optional[Path] = None
+    for root in candidate_roots:
+        if (root / raw_csv_name).exists():
+            resolved_root = root
+            break
+
+    if resolved_root is None:
+        return None
+
+    input_csv = resolved_root / raw_csv_name
     if not input_csv.exists():
         return None
 
-    clean_csv = data_root / clean_csv_name
-    vector_csv = data_root / vector_csv_name
+    clean_csv = resolved_root / clean_csv_name
+    vector_csv = resolved_root / vector_csv_name
 
     # Skip rebuild when artifacts are newer than raw metadata to speed up repeated training runs.
     if clean_csv.exists() and vector_csv.exists():

@@ -1,163 +1,176 @@
-# THUOC - Hệ thống Phân loại Viên thuốc từ Ảnh (Deep Learning)
+# THUOC - He thong phan loai vien thuoc tu anh
 
-Dự án này phát triển hệ thống phân loại viên thuốc từ ảnh sử dụng các rẽ nhánh mô hình Deep Learning tiên tiến nhất: **ResNet50**, **EfficientNet-B0**, và **ViT-B/16**. Hệ thống được thiết kế với kiến trúc rõ ràng, chuẩn hóa, hỗ trợ tối đa cho cả nhà phát triển con người và các AI Agent (như Claude Code, Cursor, Windsurf, v.v.) trong việc nắm bắt ranh giới mã nguồn, đóng góp và tự tối ưu hoá code.
+THUOC la du an nhan dien va phan loai vien thuoc bang deep learning, toi uu cho quy trinh train -> evaluate -> ensemble -> report, dong thoi ho tro luong prescription_match de doi chieu vien thuoc voi don thuoc.
 
----
+Tai lieu nay mo ta trang thai codebase hien tai:
+- Cau truc thu muc va vai tro tung module
+- Luong pipeline dang chay trong code
+- Vi tri artifact dau ra theo chuan moi
+- Lenh su dung chinh xac voi CLI hien tai
 
-## 🚀 1. Luồng Hoạt Động Của Hệ Thống (Pipeline)
+## 1) Tong quan nhanh
 
-Quy trình xử lý từ lúc nạp ảnh thô cho đến output dự đoán cuối cùng được biểu diễn dưới dạng sơ đồ luồng chuyên sâu sau:
+- Bai toan chinh: image classification theo class folder trong data_aligned
+- So lop khong hardcode: num_classes duoc suy ra tu dataset/checkpoint
+- Trang thai dataset hien tai: data_aligned train/val/test dang co 104 class folders moi split
+- Model dang su dung: resnet50, efficientnet_b0, vit_b_16 (ensemble soft-voting)
+- Framework: PyTorch + torchvision, Python 3.10+
+- Nguon su that ve hparams: Review/optimal_configs.py
+
+## 2) Luong pipeline dang trien khai
 
 ```mermaid
-graph TD
-    A[📁 Raw Images] --> B(data_aligned/)
-    B -->|Chia Tỉ Lệ Train/Val/Test| C[PillImageDataset]
-    C -->|Augmentation / Normalization| D[Data Transforms]
-    D --> E[DataLoader]
-    
-    E -->|Batching| F{Khởi Tạo Mô Hình <br> src/models/}
-    
-    F -->|CNN| G1[ResNet-50]
-    F -->|Optimized CNN| G2[EfficientNet-B0]
-    F -->|Transformer| G3[ViT-B/16]
-    
-    G1 -->|CrossEntropyLoss <br> Mixup + Label Smoothing| H(Cặp Trọng Số \n *_epillid_best.pt)
-    G2 -->|CrossEntropyLoss <br> Mixup + Label Smoothing| H
-    G3 -->|CrossEntropyLoss <br> Mixup + Label Smoothing| H
-    
-    H --> I[Evaluation & Metrics]
-    I -->|Test-time Augmentation| J[Thuật Toán Ensemble <br> Weighted Soft-Voting]
-    J --> K((Output Dự Đoán <br> & Báo Cáo Phân Tích))
+flowchart TD
+    A[data_aligned train val test] --> B[PillImageDataset + build_transforms]
+    B --> C[model_factory load or create model]
+    C --> D[training train.py]
+    D --> E[models AI model_alias model_epillid_best.pt]
+    E --> F[evaluate_report.py]
+    F --> G[ensemble weighted soft voting]
+    G --> H[models results + reports latest]
 ```
 
-### Chi tiết giải thuật của từng Model:
-Hệ thống kết hợp ba dòng kiến trúc thuật toán để bổ trợ điểm yếu cho nhau (Ensemble):
-1. **ResNet50 (Residual Networks):** Sử dụng các khối học thặng dư (Residual Blocks) triệt tiêu vấn đề mất mát gradient (vanishing gradient). Thuật toán này rất mạnh trong việc nắm bắt các đặc trưng cục bộ cứng cáp của viên thuốc như các vạch chia, cạnh và màu sắc cơ bản.
-2. **EfficientNet-B0:** Mạng CNN được tự động cân bằng (Compound Scaling) giữa độ sâu (layers), chiều rộng (channels) và độ phân giải hình ảnh. Mô hình này giúp tìm ra các chi tiết nhỏ hoặc dị thường trên bề mặt thuốc một cách vô cùng hiệu quả về mặt tính toán.
-3. **ViT-B/16 (Vision Transformer):** Khác biệt hoàn toàn với CNN truyền thống, ViT cắt ảnh viên thuốc thành lưới các mảnh nhỏ (patch) có kích thước 16x16 pixel. Áp dụng cơ chế **Self-Attention** (Tự chú ý) của kiến trúc Transformer, hệ thống học được mối tương quan toàn cục của viên thuốc (Hình dáng tổng thể, text khắc trên hai đầu của thuốc) từ xa thay vì chỉ nhìn cục bộ.
+### Ky thuat train/eval dang dung
 
----
+- Stage train 2 pha: freeze backbone -> unfreeze full model
+- Loss va regularization: CrossEntropy + label smoothing + mixup
+- On-training stability: AdamW, ReduceLROnPlateau, gradient clipping, early stopping
+- On-eval robustness: TTA, EMA
+- Offline-safe pretrained: fallback random init trong model factory
 
-## 📂 2. Cấu Trúc Thư Mục & Giải Thích Chi Tiết Từng File
-
-*Ranh giới và chức năng của từng file/thư mục được thiết lập cực kỳ nghiêm ngặt nhằm tránh các AI tự ý định nghĩa sai lệch logic hệ thống.*
+## 3) Cau truc thu muc theo he thong hien tai
 
 ```text
 THUOC/
-├── run_all.py                         # 🎯 Entrypoint tổng: File chạy lệnh gốc điều phối việc đọc data, chạy huấn luyện cả 3 model, sinh báo cáo tập trung và gộp mô hình (Ensemble).
-├── train_cli.py                       # 🛠️ Giao diện dòng lệnh (CLI): Chứa chức năng parse tham số để train 1 model cụ thể (`single mode`), tuning tham số (`optimize mode`) hoặc smoke test để debug.
-├── requirements.txt                   # 📝 Chứa tất cả các package Python bắt buộc để chạy.
-├── AGENTS.md                          # 🤖 RULES cho AI: Tệp chứa Prompt/Khái niệm/Contracts khắt khe (ví dụ: Không bypass factory, giới hạn tên file ảnh) để AI Agent tuân thủ khi viết code.
-├── README.md                          # 📖 Tài liệu dự án (File này).
+├── AGENTS.md
+├── README.md
+├── requirements.txt
+├── run_all.py
+├── train_cli.py
 │
-├── src/                               # 🧠 CORE LOGIC: Source code chính được phân mảnh chặt chẽ.
-│   ├── data/                          # 🗃️ [TIẾP NHẬN & XỬ LÝ DỮ LIỆU]
-│   │   ├── features.py                # Chứa `PillImageDataset` để load ảnh, áp dụng random scale/rotate (transform) và map nhãn bằng class_to_idx.
-│   │   ├── metadata.py                # Xử lý các mô tả text hoặc file CSV (nếu có) đi kèm đặc tính của viên thuốc.
-│   │   └── build_epillid_data.py      # Script chuẩn hóa thư mục (align data): Tạo folder chuẩn train/val/test chung một format.
-│   │
-│   ├── models/                        # 🏗️ [ĐỊNH NGHĨA KIẾN TRÚC MẠNG]
-│   │   ├── resnet50.py                # Define layer ResNet50 + classifier head tùy chỉnh.
-│   │   ├── efficientnet_b0.py         # Define cấu trúc mạng EfficientNet-B0.
-│   │   ├── vit_b_16.py                # Define cấu trúc Vision Transformer ViT-B/16.
-│   │   └── model_factory.py           # Thiết kế Factory Pattern - file DUY NHẤT được gọi sinh model hoặc load file weight dạng `load_checkpoint_class_to_idx`.
-│   │
-│   ├── training/                      # 🏋️ [TỐI ƯU TRỌNG SỐ]
-│   │   └── train.py                   # Chứa vòng lặp Training Loop (Backprop, Loss, mixup) & Val Loop (TTA, EMA, Early Stop). Không gọi logic module khác tại đây.
-│   │
-│   ├── orchestration/                 # 🎼 [ĐIỀU PHỐI EVENT]
-│   │   └── pipeline.py                # Ghép nối luồng dữ liệu chảy qua Model Factory vào file train.py và sang file evaluate_report.py kế tiếp.
-│   │
-│   ├── evaluation/                    # 📊 [ĐÁNH GIÁ CHẤT LƯỢNG]
-│   │   └── evaluate_report.py         # Viết logic lấy kết quả prediction để tính Accuracy, F1-Score, in ra Confusion Matrix. (Chỉ tính toán, tuyệt đối không update weight).
-│   │
-│   ├── inference/                     # 🔍 [SUY LUẬN TRÊN ẢNH MỚI]
-│   │   └── inference.py               # Lọc lấy vector đặc trưng (Feature extraction) trên ảnh chưa từng thấy, kết hợp màu/size/texture để so sánh sự giống nhau giữa 2 viên thuốc.
-│   │
-│   └── learning/                      # 💡 [ACTIVE LEARNING]
-│       └── self_learning.py           # Theo dõi những ảnh dự đoán sai lầm (Hard Examples) lớn để cảnh báo hoặc đề xuất train lại.
+├── Review/
+│   ├── optimal_configs.py
+│   └── review_terminal.py
 │
-├── Review/                            # ⚙️ [KHU VỰC TỐI ƯU HYPERPARAMETER]
-│   ├── review_terminal.py             # Script tự động phân tích loss/metrics các vòng train để đề xuất config cho vòng sau.
-│   └── optimal_configs.py             # 💎 NGUỒN SỰ THẬT: File chứa từ điển hparams (Learning rate, epochs, weight decay) tốt nhất hiện hành. (Cấm hardcode Hparam).
+├── src/
+│   ├── data/
+│   │   ├── build_epillid_data.py
+│   │   ├── data_setup.py
+│   │   ├── features.py
+│   │   ├── metadata.py
+│   │   └── prescription_csv_builder.py
+│   ├── models/
+│   │   ├── resnet50.py
+│   │   ├── efficientnet_b0.py
+│   │   ├── vit_b_16.py
+│   │   └── model_factory.py
+│   ├── training/train.py
+│   ├── orchestration/pipeline.py
+│   ├── evaluation/evaluate_report.py
+│   ├── inference/
+│   │   ├── inference.py
+│   │   ├── prescription_matching.py
+│   │   └── README_prescription_matching.md
+│   └── utils/
+│       ├── model_paths.py
+│       └── runtime_artifacts.py
 │
-├── models/                            # 📦 [ARTIFACTS ĐẦU RA] 
-│   ├── *_epillid_best.pt              # Trọng số tốt nhất của 3 mô hình (Bị ignore trên Git).
-│   ├── *.metrics.json / .history.json # Tệp lịch sử log các vòng epoch quá trình train.
-│   ├── *_training_curves.png          # Đồ thị biểu diễn Learning Curve.
-│   ├── evaluation_summary.csv         # Bảng điểm tổng kết sự so sánh chéo 3 model.
-│   └── reports/latest/                # Nơi chứa log text và bản đồ nhầm lẫn (Confusion Matrix).
-│
-├── data_aligned/                      # 📁 Phân vùng dữ liệu đã chuẩn hóa dùng chạy thuật toán (Không commit Git).
-├── data/                              # 📁 Dữ liệu thô ban đầu (Không Git).
-├── demo_images/                       # 🖼️ Nơi chứa các mẫu ảnh ngoài luồng phục vụ test Inference nhanh.
-└── tests/                             # 🧪 [UNIT TESTS TỰ ĐỘNG]
-    ├── test_features.py               # Test chức năng transform & load Dataset.
-    ├── test_inference_utils.py        # Đảm bảo logic xuất pipeline feature từ ảnh không sai lệch.
-    └── test_metadata.py               # File test đọc metadata/mapping label.
+├── tests/
+├── data/
+├── data_aligned/
+├── models/
+│   ├── AI/
+│   │   ├── resnet50/
+│   │   ├── efficientnet/
+│   │   └── vit_b_16/
+│   ├── results/
+│   │   ├── evaluation/
+│   │   └── training/
+│   └── reports/latest/
+├── log/
+└── json/
 ```
 
----
-
-## ⌨️ 3. Hướng Dẫn Cài Đặt và Sử Dụng Cơ Bản
-
-Mở Terminal / Command Prompt và chạy các lệnh dưới đây tùy mục đích:
+## 4) Lenh su dung chinh
 
 ```bash
-# BƯỚC 1: Cài đặt thư viện
 pip install -r requirements.txt
 
-# ==========================================
-# CÁC LỆNH CHÍNH
-# ==========================================
-
-# 1. Chạy full pipeline (Train tất cả model > Load best > Evaluate > Ensemble > Sinh Report)
+# Full pipeline (train + eval + report)
 python run_all.py
 
-# 2. Huấn luyện độc lập 1 mô hình cụ thể (Ví dụ: resnet50 / efficientnet_b0 / vit_b_16)
-python train_cli.py --mode single --model resnet50 --epochs 28
-
-# 3. Chạy Hyperparameter tuning (Tìm kiếm config tốt nhất tự động qua nhiều vòng)
-python train_cli.py --mode optimize --rounds 3 --epochs 12
-
-# 4. Chỉ đánh giá từ các trọng số mô hình đã có sẵn, KHÔNG huấn luyện lại
+# Chi evaluate tren checkpoint co san
 python run_all.py --compare-only
 
-# 5. Chạy trên CPU, sử dụng flag này khi máy không hỗ trợ GPU / CUDA
+# CPU mode
 python run_all.py --device cpu
 
-# 6. DEV / DEBUG: Run Smoke Test & Unit Test (Chạy kiểm thử độ sống sót nhanh)
-python train_cli.py --mode single --model resnet50 --epochs 2 --batch-size 4   
-python -m pytest tests/ -q                                                     
+# Train 1 model
+python train_cli.py --mode single --model resnet50 --epochs 28
+python train_cli.py --mode single --model efficientnet_b0 --epochs 28
+python train_cli.py --mode single --model vit_b_16 --epochs 32
+
+# Tuning nhieu vong
+python train_cli.py --mode optimize --rounds 3 --epochs 12
+
+# Smoke test
+python train_cli.py --mode single --model resnet50 --epochs 2 --batch-size 4
+
+# Unit tests
+python -m pytest tests/ -q
 ```
 
----
-
-## 📦 4. Hướng Dẫn Tải Dữ Liệu Gốc (VAIPE 2022)
-
-Các bạn có thể tải dữ liệu đầy đủ `public_train.zip` trong thư mục `File Full`. Ngoài ra, file `public_train.zip` được chia nhỏ để thuận tiện trong quá trình tải dữ liệu. Sau khi tải toàn bộ 5 file liên quan: 
-
-```text
-public_train_s.z01
-public_train_s.z02
-public_train_s.z03
-public_train_s.z04
-public_train_s.zip
-```
-
-Sử dụng lệnh sau để gộp thành 1 file và giải nén (Yêu cầu phiên bản cài đặt ZIP từ `3.0` trở lên):
+Prescription matching:
 
 ```bash
-zip -s- public_train_s.zip -O public_train.zip
-unzip public_train.zip
+python train_cli.py --mode prescription_match --prescription-image data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png --pill-images data/images/public_train/pill/image/VAIPE_P_0_0.jpg data/images/public_train/pill/image/VAIPE_P_0_1.jpg --pretty
+
+python train_cli.py --mode prescription_match --prescription-image data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png --pill-images data/images/public_train/pill/image/VAIPE_P_0_0.jpg data/images/public_train/pill/image/VAIPE_P_0_1.jpg --output-json json/prescription_match_latest.json --output-csv models/reports/latest/prescription_match.csv --pretty
 ```
 
----
+Build data tu ePillID (chi khi can import ePillID benchmark):
 
-## ⚖️ 5. Điều Khoản Sử Dụng Dữ Liệu
-Bằng cách tải xuống hoặc truy cập dữ liệu do Ban tổ chức cuộc thi cung cấp theo bất kỳ cách nào, bạn đồng ý với các điều khoản:
+```bash
+python src/data/build_epillid_data.py --epillid-root <duong_dan_epillid> --img-root <duong_dan_anh> --output-root data_aligned
+```
 
-- Thí sinh **KHÔNG** được sử dụng dữ liệu khác ngoài tập dữ liệu được cung cấp bởi cuộc thi. Bạn sẽ không phân phối dữ liệu ngoại trừ mục đích phi thương mại và nghiên cứu học thuật.
-- Bạn sẽ **không** phân phối, sao chép, tái sản xuất, tiết lộ, chuyển nhượng, cấp phép phụ, nhúng, lưu trữ, chuyển nhượng, bán, giao dịch hoặc bán lại bất kỳ phần nào của dữ liệu do Ban tổ chức cuộc thi cung cấp cho các bên thứ ba dưới bất kỳ hình thức nào.
-- Dữ liệu hoàn toàn cấm sử dụng nhằm xâm phạm, phân tách, cô lập một nhóm cá nhân một cách bất hợp pháp.
-- Bạn hoàn toàn chịu trách nhiệm cho các khiếu kiện phát sinh nếu vi phạm giấy phép do ban tổ chức (VAIPE) bảo lưu.
+Luu y: run_all.py va train_cli.py da co co che discover_or_prepare_data_dir de uu tien data_aligned va tu dong tao lai neu tim thay raw VAIPE.
+
+## 5) Contracts quan trong
+
+- Dataset structure bat buoc: data_aligned/train|val|test/class/*.jpg
+- 3 split phai cung tap class folder de tranh sai class mapping
+- Dataset tuple output phai giu nguyen thu tu: (image_tensor, class_idx, image_path)
+- Luon khoi tao/load model qua src/models/model_factory.py
+- Khi infer/evaluate tu checkpoint, uu tien load_checkpoint_class_to_idx de dong bo mapping class
+
+## 6) Vi tri artifact dau ra (chuan hien tai)
+
+Theo chuan moi, artifact duoc sap theo model alias va theo loai ket qua:
+
+- Checkpoint + history + metrics + curves:
+  - models/AI/resnet50/resnet50_epillid_best.pt
+  - models/AI/efficientnet/efficientnet_b0_epillid_best.pt
+  - models/AI/vit_b_16/vit_b_16_epillid_best.pt
+- Tong hop evaluate:
+  - models/results/evaluation/evaluation_summary.csv
+  - models/results/evaluation/evaluation_comparison.png
+- Bang tong hop train:
+  - models/results/training/training_results_table.csv
+  - models/results/training/training_results_table.md
+- JSON + confusion matrix:
+  - models/reports/latest/evaluation_summary.json
+  - models/reports/latest/confusion_matrix_*.png
+
+## 7) Quick verify truoc khi nop
+
+```bash
+python -m pytest tests/ -q
+python run_all.py --compare-only
+```
+
+## 8) Luu y du lieu va ban quyen
+
+- Khong commit data/, data_aligned/, models/*.pt
+- Chi su dung du lieu theo dung dieu khoan ban to chuc cung cap
+- Nen mo rong gitignore de tranh day nham artifact lon
