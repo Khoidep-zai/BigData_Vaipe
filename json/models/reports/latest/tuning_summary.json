@@ -1,0 +1,30 @@
+{
+    "resnet50":  {
+                     "best_cfg":  {
+                                      "lr":  0.0001,
+                                      "weight_decay":  0.0005,
+                                      "label_smoothing":  0.12,
+                                      "mixup_alpha":  0.25
+                                  },
+                     "gap_score":  0.1966177497591291
+                 },
+    "efficientnet_b0":  {
+                            "best_cfg":  {
+                                             "lr":  0.00012,
+                                             "weight_decay":  0.0003,
+                                             "label_smoothing":  0.1,
+                                             "mixup_alpha":  0.18
+                                         },
+                            "gap_score":  0.14626089819185026
+                        },
+    "vit_b_16":  {
+                     "best_cfg":  {
+                                      "lr":  0.00012,
+                                      "weight_decay":  0.0003,
+                                      "label_smoothing":  0.1,
+                                      "mixup_alpha":  0.18
+                                  },
+                     "gap_score":  0.6376277995961053,
+                     "note":  "High gap_score is expected on the current tiny test/validation setup; re-run tuning on a larger split for stable architecture-specific comparison."
+                 }
+}

@@ -9,22 +9,19 @@ __pycache__/
 /.prescription_match_*.log
 
 # Centralized runtime artifact folders
-/json/log/
-/json/
 
 # Dataset and large local data
 /data_aligned/
 /data/images/
 /data/csv/
 
-/log/
+
 
 # Local IDE/workspace files
 /.idea/
 /.vscode/
 
 # Web runtime uploads
-/Web/uploads/
 
 /venv/
 /.venv/

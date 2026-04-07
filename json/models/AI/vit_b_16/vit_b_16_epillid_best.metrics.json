@@ -1,0 +1,12 @@
+{
+  "best_val_acc": 0.6471314003701419,
+  "epochs": 7,
+  "model": "vit_b_16",
+  "lr": 0.0003,
+  "weight_decay": 0.0001,
+  "label_smoothing": 0.1,
+  "mixup_alpha": 0.2,
+  "backbone_lr_scale": 0.2,
+  "ema_decay": 0.997,
+  "tta_views": 3
+}

@@ -1,0 +1,59 @@
+{
+  "prescription_image": "data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png",
+  "prescription_json": "VAIPE_P_TRAIN_0.json",
+  "classes_in_prescription": [
+    10,
+    47,
+    64
+  ],
+  "pill_results": [
+    {
+      "pill_image": "data\\images\\public_train\\pill\\image\\VAIPE_P_0_0.jpg",
+      "in_prescription": [
+        {
+          "class_id": 64,
+          "class_name": "class_64",
+          "medicine_name": "hoạt huyết dưỡng não qn 150mg+20mg",
+          "bbox_x": 1520,
+          "bbox_y": 1824,
+          "bbox_w": 261,
+          "bbox_h": 236
+        },
+        {
+          "class_id": 64,
+          "class_name": "class_64",
+          "medicine_name": "hoạt huyết dưỡng não qn 150mg+20mg",
+          "bbox_x": 2227,
+          "bbox_y": 2090,
+          "bbox_w": 261,
+          "bbox_h": 267
+        }
+      ],
+      "out_of_prescription": []
+    },
+    {
+      "pill_image": "data\\images\\public_train\\pill\\image\\VAIPE_P_0_1.jpg",
+      "in_prescription": [
+        {
+          "class_id": 64,
+          "class_name": "class_64",
+          "medicine_name": "hoạt huyết dưỡng não qn 150mg+20mg",
+          "bbox_x": 980,
+          "bbox_y": 1712,
+          "bbox_w": 323,
+          "bbox_h": 291
+        },
+        {
+          "class_id": 64,
+          "class_name": "class_64",
+          "medicine_name": "hoạt huyết dưỡng não qn 150mg+20mg",
+          "bbox_x": 1402,
+          "bbox_y": 1774,
+          "bbox_w": 317,
+          "bbox_h": 291
+        }
+      ],
+      "out_of_prescription": []
+    }
+  ]
+}

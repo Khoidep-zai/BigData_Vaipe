@@ -1,0 +1,9 @@
+{
+  "prescription_image": "pres.png",
+  "prescription_json": "pres.json",
+  "classes_in_prescription": [
+    1,
+    2
+  ],
+  "pill_results": []
+}

@@ -138,7 +138,17 @@ Hệ thống được tổ chức thành 6 lớp chức năng chính:
 
 ![Biểu đồ so sánh kết quả đánh giá](models/results/evaluation/evaluation_comparison.png)
 
-### 7.2. Confusion matrix theo mô hình
+### 7.2. Biểu đồ train/val của 3 mô hình (bằng chứng đã huấn luyện)
+
+![Training curves ResNet50](models/AI/resnet50/resnet50_training_curves.png)
+
+![Training curves EfficientNet-B0](models/AI/efficientnet/efficientnet_b0_training_curves.png)
+
+![Training curves ViT-B/16](models/AI/vit_b_16/vit_b_16_training_curves.png)
+
+Các biểu đồ trên thể hiện quá trình hội tụ train/val của từng mô hình trong quá trình huấn luyện thực tế.
+
+### 7.3. Confusion matrix theo mô hình
 
 ![Confusion matrix ResNet50](models/reports/latest/confusion_matrix_resnet50.png)
 
@@ -146,12 +156,12 @@ Hệ thống được tổ chức thành 6 lớp chức năng chính:
 
 ![Confusion matrix Ensemble Weighted](models/reports/latest/confusion_matrix_ensemble_weighted.png)
 
-### 7.3. File kết quả nghiên cứu đi kèm
+### 7.4. File kết quả nghiên cứu đi kèm
 - models/results/evaluation/evaluation_summary.csv
 - models/results/training/training_results_table.csv
 - models/reports/latest/evaluation_summary.json
 
-### 7.4. Benchmark tốc độ suy luận (Web API)
+### 7.5. Benchmark tốc độ suy luận (Web API)
 
 Nguồn benchmark chi tiết:
 
