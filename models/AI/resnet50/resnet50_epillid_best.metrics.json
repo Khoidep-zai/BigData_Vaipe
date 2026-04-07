@@ -1,0 +1,12 @@
+{
+  "best_val_acc": 0.6020974706971005,
+  "epochs": 28,
+  "model": "resnet50",
+  "lr": 6e-05,
+  "weight_decay": 0.0012,
+  "label_smoothing": 0.16,
+  "mixup_alpha": 0.35,
+  "backbone_lr_scale": 0.15,
+  "ema_decay": 0.998,
+  "tta_views": 3
+}

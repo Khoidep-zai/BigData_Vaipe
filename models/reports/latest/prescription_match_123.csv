@@ -1,0 +1,5 @@
+﻿prescription_image,prescription_json,pill_image,group,class_id,class_name,medicine_name,bbox_x,bbox_y,bbox_w,bbox_h
+data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png,VAIPE_P_TRAIN_0.json,data\images\public_train\pill\image\VAIPE_P_0_0.jpg,in_prescription,64,class_64,hoạt huyết dưỡng não qn 150mg+20mg,1520,1824,261,236
+data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png,VAIPE_P_TRAIN_0.json,data\images\public_train\pill\image\VAIPE_P_0_0.jpg,in_prescription,64,class_64,hoạt huyết dưỡng não qn 150mg+20mg,2227,2090,261,267
+data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png,VAIPE_P_TRAIN_0.json,data\images\public_train\pill\image\VAIPE_P_0_1.jpg,in_prescription,64,class_64,hoạt huyết dưỡng não qn 150mg+20mg,980,1712,323,291
+data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png,VAIPE_P_TRAIN_0.json,data\images\public_train\pill\image\VAIPE_P_0_1.jpg,in_prescription,64,class_64,hoạt huyết dưỡng não qn 150mg+20mg,1402,1774,317,291
