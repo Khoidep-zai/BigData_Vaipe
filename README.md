@@ -1,176 +1,293 @@
-# THUOC - He thong phan loai vien thuoc tu anh
+# 💊 THUOC - Hệ thống phân loại viên thuốc bằng Deep Learning
 
-THUOC la du an nhan dien va phan loai vien thuoc bang deep learning, toi uu cho quy trinh train -> evaluate -> ensemble -> report, dong thoi ho tro luong prescription_match de doi chieu vien thuoc voi don thuoc.
+> **Nhóm nghiên cứu:** VLU.AI-Med Team - Trường Đại học Văn Lang  
+> **Học phần:** Nhập môn Phân tích dữ liệu và Học sâu  
+> **Định hướng:** Nghiên cứu khoa học sinh viên, ứng dụng AI vào bài toán y tế số
 
-Tai lieu nay mo ta trang thai codebase hien tai:
-- Cau truc thu muc va vai tro tung module
-- Luong pipeline dang chay trong code
-- Vi tri artifact dau ra theo chuan moi
-- Lenh su dung chinh xac voi CLI hien tai
+---
 
-## 1) Tong quan nhanh
+## 📑 Mục lục
+- [1. Tóm tắt đề tài](#1-tóm-tắt-đề-tài)
+- [2. Mục tiêu và phạm vi nghiên cứu](#2-mục-tiêu-và-phạm-vi-nghiên-cứu)
+- [3. Kiến trúc hệ thống](#3-kiến-trúc-hệ-thống)
+- [4. Dữ liệu và tiền xử lý](#4-dữ-liệu-và-tiền-xử-lý)
+- [5. Phương pháp mô hình](#5-phương-pháp-mô-hình)
+- [6. Chiến lược huấn luyện](#6-chiến-lược-huấn-luyện)
+- [7. Kết quả thực nghiệm và hình minh họa](#7-kết-quả-thực-nghiệm-và-hình-minh-họa)
+- [8. Triển khai Web và tích hợp hệ thống](#8-triển-khai-web-và-tích-hợp-hệ-thống)
+- [9. Hướng dẫn cài đặt và vận hành](#9-hướng-dẫn-cài-đặt-và-vận-hành)
+- [10. Câu hỏi thường gặp (FAQ)](#10-câu-hỏi-thường-gặp-faq)
+- [11. Lợi ích thực tiễn và hướng phát triển tương lai](#11-lợi-ích-thực-tiễn-và-hướng-phát-triển-tương-lai)
+- [12. Cấu trúc dự án](#12-cấu-trúc-dự-án)
+- [13. Đóng góp nhóm nghiên cứu](#13-đóng-góp-nhóm-nghiên-cứu)
+- [14. Giấy phép](#14-giấy-phép)
 
-- Bai toan chinh: image classification theo class folder trong data_aligned
-- So lop khong hardcode: num_classes duoc suy ra tu dataset/checkpoint
-- Trang thai dataset hien tai: data_aligned train/val/test dang co 104 class folders moi split
-- Model dang su dung: resnet50, efficientnet_b0, vit_b_16 (ensemble soft-voting)
-- Framework: PyTorch + torchvision, Python 3.10+
-- Nguon su that ve hparams: Review/optimal_configs.py
+---
 
-## 2) Luong pipeline dang trien khai
+## 1. Tóm tắt đề tài
+THUOC là hệ thống nhận diện viên thuốc từ ảnh sử dụng deep learning, hướng tới hai bài toán thực tế:
 
-```mermaid
-flowchart TD
-    A[data_aligned train val test] --> B[PillImageDataset + build_transforms]
-    B --> C[model_factory load or create model]
-    C --> D[training train.py]
-    D --> E[models AI model_alias model_epillid_best.pt]
-    E --> F[evaluate_report.py]
-    F --> G[ensemble weighted soft voting]
-    G --> H[models results + reports latest]
+- Phân loại ảnh viên thuốc theo lớp thuốc.
+- Kiểm tra thuốc có thuộc toa hay ngoài toa (true/false) bằng ngữ cảnh đơn thuốc.
+
+Dự án xây dựng pipeline đầy đủ từ huấn luyện đến triển khai:
+
+- Train nhiều mô hình (ResNet50, EfficientNet-B0, ViT-B/16).
+- Evaluate và so sánh bằng Accuracy, Macro-F1, confusion matrix.
+- Ensemble soft-voting để tăng độ ổn định.
+- Triển khai Web Flask cho thao tác thực tế trên ảnh upload/camera.
+
+---
+
+## 2. Mục tiêu và phạm vi nghiên cứu
+### 2.1. Mục tiêu
+- Xây dựng quy trình phân loại ảnh viên thuốc có thể tái sử dụng trong môi trường học thuật và nghiên cứu ứng dụng.
+- Tạo giao diện Web dễ dùng cho người dùng không chuyên kỹ thuật.
+- Đảm bảo đầu ra rõ ràng cho bài toán hỗ trợ kiểm soát đơn thuốc.
+
+### 2.2. Phạm vi
+- Dữ liệu ưu tiên: data_aligned, cấu trúc train/val/test đồng nhất class folders.
+- Số lớp không hardcode, phụ thuộc dataset/checkpoint.
+- Triển khai infer trên CPU mặc định, hỗ trợ CUDA khi khả dụng.
+
+---
+
+## 3. Kiến trúc hệ thống
+
+![Pipeline tổng thể THUOC](docs/figures/pipeline-overview.svg)
+
+Pipeline gồm 6 lớp chức năng:
+
+1. Data module: đọc ảnh và augmentation.
+2. Model factory: khởi tạo/tải checkpoint đúng class mapping.
+3. Training engine: tối ưu mô hình với regularization.
+4. Evaluation: đo hiệu năng chi tiết.
+5. Ensemble: kết hợp xác suất nhiều mô hình.
+6. Runtime/Web: cung cấp API và giao diện sử dụng.
+
+---
+
+## 4. Dữ liệu và tiền xử lý
+### 4.1. Cấu trúc dữ liệu chuẩn
+
+- data_aligned/train/class_xxx/*.jpg
+- data_aligned/val/class_xxx/*.jpg
+- data_aligned/test/class_xxx/*.jpg
+
+### 4.2. Các nguyên tắc dữ liệu quan trọng
+- Bộ class giữa train/val/test phải đồng nhất.
+- Tuple đầu ra dataset chuẩn: (image_tensor, class_idx, image_path).
+- Prescription matching dùng target_class_id 0..107, trong đó 107 là out_of_prescription.
+
+### 4.3. Tiền xử lý chính
+- Focus vùng viên thuốc trước khi đưa vào mô hình.
+- Biến đổi ảnh train/val/test theo profile phù hợp.
+- Chuẩn hóa thống nhất để đảm bảo so sánh giữa mô hình công bằng.
+
+---
+
+## 5. Phương pháp mô hình
+
+| Mô hình | Vai trò trong nghiên cứu | Điểm mạnh |
+|---|---|---|
+| ResNet50 | Baseline CNN mạnh, ổn định | Dễ hội tụ, kiểm soát overfit tốt |
+| EfficientNet-B0 | Mô hình nhẹ, hiệu quả tham số | Cân bằng tốc độ và chất lượng |
+| ViT-B/16 | Mô hình transformer thị giác | Khai thác ngữ cảnh toàn cục tốt |
+
+### 5.1. Nguyên tắc an toàn class mapping
+- Không hardcode num_classes.
+- Khi infer/evaluate từ checkpoint phải đọc class_to_idx trong checkpoint.
+- Mục tiêu: tránh lệch nhãn khi dữ liệu thay đổi.
+
+---
+
+## 6. Chiến lược huấn luyện
+
+![Chiến lược huấn luyện và đánh giá](docs/figures/training-strategy.svg)
+
+### 6.1. Kỹ thuật tối ưu chính
+- Huấn luyện theo pha freeze/unfreeze.
+- Optimizer AdamW + scheduler ReduceLROnPlateau.
+- Early stopping, gradient clipping, EMA, mixup, label smoothing.
+
+### 6.2. Cấu hình mặc định đang dùng
+
+| Model | lr | weight_decay | label_smoothing | mixup_alpha | epochs | patience |
+|---|---:|---:|---:|---:|---:|---:|
+| ResNet50 | 6e-5 | 1.2e-3 | 0.16 | 0.35 | 28 | 6 |
+| EfficientNet-B0 | 7e-5 | 1e-3 | 0.15 | 0.33 | 28 | 6 |
+| ViT-B/16 | 5e-5 | 1.4e-3 | 0.20 | 0.42 | 32 | 7 |
+
+---
+
+## 7. Kết quả thực nghiệm và hình minh họa
+
+### 7.1. Biểu đồ so sánh mô hình
+
+![Biểu đồ so sánh kết quả đánh giá](models/results/evaluation/evaluation_comparison.png)
+
+### 7.2. Confusion matrix theo mô hình
+
+![Confusion matrix ResNet50](models/reports/latest/confusion_matrix_resnet50.png)
+
+![Confusion matrix EfficientNet-B0](models/reports/latest/confusion_matrix_efficientnet_b0.png)
+
+![Confusion matrix Ensemble Weighted](models/reports/latest/confusion_matrix_ensemble_weighted.png)
+
+### 7.3. File kết quả nghiên cứu đi kèm
+- models/results/evaluation/evaluation_summary.csv
+- models/results/training/training_results_table.csv
+- models/reports/latest/evaluation_summary.json
+
+### 7.4. Benchmark tốc độ suy luận (Web API)
+
+Nguồn benchmark chi tiết:
+
+- docs/benchmarks/inference_benchmark.json
+- docs/benchmarks/inference_benchmark.md
+
+| Endpoint Scenario | Device | Runs | Mean (ms) | P50 (ms) | P95 (ms) | Min (ms) | Max (ms) |
+|---|---|---:|---:|---:|---:|---:|---:|
+| classify_single_image | cpu | 12 | 524.34 | 523.44 | 572.28 | 492.86 | 608.54 |
+| check_prescription_two_pills | cpu | 8 | 2062.26 | 2038.40 | 2348.78 | 1764.43 | 2408.32 |
+| classify_single_image | cuda | - | N/A | N/A | N/A | N/A | N/A |
+| check_prescription_two_pills | cuda | - | N/A | N/A | N/A | N/A | N/A |
+
+Ghi chú: môi trường benchmark hiện tại chưa có CUDA, do đó chưa có số đo GPU.
+
+Lưu ý: nếu chưa có ảnh/biểu đồ, chạy lại compare-only để sinh artifacts:
+
+```bash
+python run_all.py --compare-only
 ```
 
-### Ky thuat train/eval dang dung
+---
 
-- Stage train 2 pha: freeze backbone -> unfreeze full model
-- Loss va regularization: CrossEntropy + label smoothing + mixup
-- On-training stability: AdamW, ReduceLROnPlateau, gradient clipping, early stopping
-- On-eval robustness: TTA, EMA
-- Offline-safe pretrained: fallback random init trong model factory
+## 8. Triển khai Web và tích hợp hệ thống
 
-## 3) Cau truc thu muc theo he thong hien tai
+![Kiến trúc Web deployment](docs/figures/web-architecture.svg)
+
+### 8.1. Ảnh giao diện Web thực tế
+
+![Giao diện Web THUOC - Desktop](docs/figures/web-ui-desktop.png)
+
+![Giao diện Web THUOC - Mobile Preview](docs/figures/web-ui-mobile.png)
+
+Ghi chú: ảnh desktop được chụp trực tiếp từ web app local đang chạy; ảnh mobile preview được thu gọn theo tỷ lệ từ ảnh chụp thật để phục vụ bố cục báo cáo.
+
+Web app hỗ trợ 2 quy trình:
+
+1. Classify: phân loại 1 ảnh viên thuốc.
+2. Check-prescription: phân tích nhiều ảnh viên thuốc theo ngữ cảnh toa thuốc.
+
+Các điểm tối ưu trong bản hiện tại:
+
+- API overview có cache TTL giúp phản hồi nhanh hơn.
+- Batch inference cho nhiều ảnh pill trong một lần suy luận.
+- Hạn chế request lỗi bằng validate input rõ ràng.
+- Frontend tự hủy request cũ khi người dùng bấm gửi liên tục.
+
+Tài liệu chi tiết phần web: xem Web/README.md.
+
+---
+
+## 9. Hướng dẫn cài đặt và vận hành
+
+### 9.1. Cài thư viện
+```bash
+pip install -r requirements.txt
+```
+
+### 9.2. Chạy pipeline đầy đủ
+```bash
+python run_all.py
+```
+
+### 9.3. Chỉ đánh giá checkpoint có sẵn
+```bash
+python run_all.py --compare-only
+```
+
+### 9.4. Chạy Web app
+```bash
+python Web/app.py
+```
+
+### 9.5. Kiểm thử
+```bash
+python -m pytest tests/ -q
+```
+
+---
+
+## 10. Câu hỏi thường gặp (FAQ)
+### Q1. Vì sao không hardcode số lớp?
+Vì số lớp thực tế phụ thuộc dataset/checkpoint. Hardcode dễ gây lệch nhãn khi cập nhật dữ liệu.
+
+### Q2. Vì sao cần ensemble?
+Ensemble giảm dao động dự đoán từng mô hình đơn lẻ, giúp kết quả ổn định hơn trong tình huống ảnh khó.
+
+### Q3. Khi nào trả về true/false trong prescription?
+- true: tất cả viên thuốc thuộc lớp trong toa.
+- false: có ít nhất một viên thuộc ngoài toa.
+- null: chưa đủ ngữ cảnh để kết luận chắc chắn.
+
+### Q4. Có thể mở rộng tích hợp thực tế không?
+Có. Hệ thống có API rõ ràng nên dễ tích hợp vào dashboard, kiosk y tế hoặc ứng dụng nội bộ.
+
+---
+
+## 11. Lợi ích thực tiễn và hướng phát triển tương lai
+### 11.1. Lợi ích thực tiễn
+- Hỗ trợ kiểm soát phát thuốc đúng toa.
+- Giảm sai sót trong bước kiểm tra thủ công.
+- Tạo dữ liệu phân tích cho hoạt động dược lâm sàng.
+
+### 11.2. Hướng tích hợp tương lai
+- Tích hợp OCR từ ảnh toa thuốc để tự động trích xuất đơn.
+- Tích hợp hệ thống quản lý nhà thuốc/bệnh viện.
+- Mở rộng sang mô hình đa ảnh/đa modal và giám sát theo thời gian thực.
+- Đóng gói thành dịch vụ API dùng cho mobile app.
+
+---
+
+## 12. Cấu trúc dự án
 
 ```text
 THUOC/
-├── AGENTS.md
-├── README.md
-├── requirements.txt
 ├── run_all.py
 ├── train_cli.py
-│
-├── Review/
-│   ├── optimal_configs.py
-│   └── review_terminal.py
-│
+├── Web/
 ├── src/
 │   ├── data/
-│   │   ├── build_epillid_data.py
-│   │   ├── data_setup.py
-│   │   ├── features.py
-│   │   ├── metadata.py
-│   │   └── prescription_csv_builder.py
 │   ├── models/
-│   │   ├── resnet50.py
-│   │   ├── efficientnet_b0.py
-│   │   ├── vit_b_16.py
-│   │   └── model_factory.py
-│   ├── training/train.py
-│   ├── orchestration/pipeline.py
-│   ├── evaluation/evaluate_report.py
+│   ├── training/
+│   ├── evaluation/
 │   ├── inference/
-│   │   ├── inference.py
-│   │   ├── prescription_matching.py
-│   │   └── README_prescription_matching.md
-│   └── utils/
-│       ├── model_paths.py
-│       └── runtime_artifacts.py
-│
-├── tests/
-├── data/
-├── data_aligned/
+│   └── orchestration/
+├── Review/
 ├── models/
-│   ├── AI/
-│   │   ├── resnet50/
-│   │   ├── efficientnet/
-│   │   └── vit_b_16/
-│   ├── results/
-│   │   ├── evaluation/
-│   │   └── training/
-│   └── reports/latest/
-├── log/
-└── json/
+├── data_aligned/
+├── tests/
+└── docs/
+    └── figures/
 ```
 
-## 4) Lenh su dung chinh
+---
 
-```bash
-pip install -r requirements.txt
+## 13. Đóng góp nhóm nghiên cứu
 
-# Full pipeline (train + eval + report)
-python run_all.py
+| Hạng mục | Nội dung thực hiện |
+|---|---|
+| Nghiên cứu mô hình | So sánh ResNet50, EfficientNet-B0, ViT-B/16 |
+| Huấn luyện và tuning | Thiết lập cấu hình tối ưu, theo dõi overfit |
+| Đánh giá thực nghiệm | Tổng hợp metrics, confusion matrix, bảng so sánh |
+| Triển khai hệ thống | Xây dựng API Flask và giao diện Web |
+| Tài liệu khoa học | Viết báo cáo kỹ thuật, giải thích kết quả và hướng ứng dụng |
 
-# Chi evaluate tren checkpoint co san
-python run_all.py --compare-only
+---
 
-# CPU mode
-python run_all.py --device cpu
+## 14. Giấy phép
+Dự án phát hành theo giấy phép MIT cho mục đích học tập và nghiên cứu.
 
-# Train 1 model
-python train_cli.py --mode single --model resnet50 --epochs 28
-python train_cli.py --mode single --model efficientnet_b0 --epochs 28
-python train_cli.py --mode single --model vit_b_16 --epochs 32
-
-# Tuning nhieu vong
-python train_cli.py --mode optimize --rounds 3 --epochs 12
-
-# Smoke test
-python train_cli.py --mode single --model resnet50 --epochs 2 --batch-size 4
-
-# Unit tests
-python -m pytest tests/ -q
-```
-
-Prescription matching:
-
-```bash
-python train_cli.py --mode prescription_match --prescription-image data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png --pill-images data/images/public_train/pill/image/VAIPE_P_0_0.jpg data/images/public_train/pill/image/VAIPE_P_0_1.jpg --pretty
-
-python train_cli.py --mode prescription_match --prescription-image data/images/public_train/prescription/image/VAIPE_P_TRAIN_0.png --pill-images data/images/public_train/pill/image/VAIPE_P_0_0.jpg data/images/public_train/pill/image/VAIPE_P_0_1.jpg --output-json json/prescription_match_latest.json --output-csv models/reports/latest/prescription_match.csv --pretty
-```
-
-Build data tu ePillID (chi khi can import ePillID benchmark):
-
-```bash
-python src/data/build_epillid_data.py --epillid-root <duong_dan_epillid> --img-root <duong_dan_anh> --output-root data_aligned
-```
-
-Luu y: run_all.py va train_cli.py da co co che discover_or_prepare_data_dir de uu tien data_aligned va tu dong tao lai neu tim thay raw VAIPE.
-
-## 5) Contracts quan trong
-
-- Dataset structure bat buoc: data_aligned/train|val|test/class/*.jpg
-- 3 split phai cung tap class folder de tranh sai class mapping
-- Dataset tuple output phai giu nguyen thu tu: (image_tensor, class_idx, image_path)
-- Luon khoi tao/load model qua src/models/model_factory.py
-- Khi infer/evaluate tu checkpoint, uu tien load_checkpoint_class_to_idx de dong bo mapping class
-
-## 6) Vi tri artifact dau ra (chuan hien tai)
-
-Theo chuan moi, artifact duoc sap theo model alias va theo loai ket qua:
-
-- Checkpoint + history + metrics + curves:
-  - models/AI/resnet50/resnet50_epillid_best.pt
-  - models/AI/efficientnet/efficientnet_b0_epillid_best.pt
-  - models/AI/vit_b_16/vit_b_16_epillid_best.pt
-- Tong hop evaluate:
-  - models/results/evaluation/evaluation_summary.csv
-  - models/results/evaluation/evaluation_comparison.png
-- Bang tong hop train:
-  - models/results/training/training_results_table.csv
-  - models/results/training/training_results_table.md
-- JSON + confusion matrix:
-  - models/reports/latest/evaluation_summary.json
-  - models/reports/latest/confusion_matrix_*.png
-
-## 7) Quick verify truoc khi nop
-
-```bash
-python -m pytest tests/ -q
-python run_all.py --compare-only
-```
-
-## 8) Luu y du lieu va ban quyen
-
-- Khong commit data/, data_aligned/, models/*.pt
-- Chi su dung du lieu theo dung dieu khoan ban to chuc cung cap
-- Nen mo rong gitignore de tranh day nham artifact lon
+Nếu sử dụng dữ liệu/ảnh trong báo cáo hoặc demo, vui lòng tuân thủ điều khoản dữ liệu của đơn vị cung cấp.

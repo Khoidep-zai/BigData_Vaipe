@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>THUOC Web | Phân tích viên thuốc</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">THUOC · Flask API</p>
+      <h1>Hệ thống phân tích viên thuốc và kiểm tra đúng toa</h1>
+      <p class="subtitle">
+        Giao diện mới được tối ưu theo từng bước rõ ràng: xem tổng quan dữ liệu,
+        phân loại ảnh viên thuốc, rồi kiểm tra thuốc ngoài toa với kết quả True/False.
+        Bạn có thể tải ảnh lên hoặc chụp trực tiếp bằng camera điện thoại.
+      </p>
+      <div class="hero-meta">
+        <div class="device-pill">Thiết bị chạy mô hình: <strong>{{ device }}</strong></div>
+        <div class="status-pill">Sẵn sàng phân tích ảnh</div>
+      </div>
+      <div class="hero-quick">
+        <a href="#buoc-2" class="quick-link">Đi tới phân loại ảnh</a>
+        <a href="#buoc-3" class="quick-link">Đi tới kiểm tra toa thuốc</a>
+      </div>
+    </header>
+
+    <section class="quick-guide card">
+      <div class="section-head">
+        <span class="step-tag">Quy trình</span>
+        <h2>Luồng sử dụng gợi ý</h2>
+      </div>
+      <div class="guide-list">
+        <div class="guide-item">
+          <span class="guide-index">1</span>
+          <div>
+            <h3>Xem tổng quan hệ thống</h3>
+            <p>Kiểm tra trạng thái dữ liệu, checkpoint mô hình và chỉ số đánh giá gần nhất.</p>
+          </div>
+        </div>
+        <div class="guide-item">
+          <span class="guide-index">2</span>
+          <div>
+            <h3>Phân loại viên thuốc</h3>
+            <p>Tải hoặc chụp 1 ảnh viên thuốc để lấy dự đoán lớp và độ tin cậy.</p>
+          </div>
+        </div>
+        <div class="guide-item">
+          <span class="guide-index">3</span>
+          <div>
+            <h3>Kiểm tra đúng toa (True/False)</h3>
+            <p>Tải ảnh toa/hóa đơn và các ảnh viên thuốc để xác định có thuốc ngoài toa hay không.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace-grid">
+      <article class="card sticky-panel" id="buoc-1">
+        <div class="card-head">
+          <div class="section-head compact">
+            <span class="step-tag">Bước 1</span>
+            <h2>Tổng quan dự án</h2>
+          </div>
+          <button id="refreshOverview" type="button" class="btn-ghost">Làm mới</button>
+        </div>
+        <p class="helper">Khối này giúp bạn xác nhận dữ liệu và mô hình đã sẵn sàng trước khi phân tích.</p>
+        <div id="overviewPanel" class="result-box">Đang tải dữ liệu tổng quan...</div>
+      </article>
+
+      <section class="work-column">
+        <article class="card" id="buoc-2">
+          <div class="section-head compact">
+            <span class="step-tag">Bước 2</span>
+            <h2>Phân loại một ảnh viên thuốc</h2>
+          </div>
+          <form id="classifyForm" class="form-grid">
+            <label>
+              Mô hình
+              <select name="model_name" required>
+                {% for model in model_names %}
+                <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>
+                {% endfor %}
+              </select>
+            </label>
+
+            <label>
+              Số kết quả hiển thị (Top-K)
+              <input type="number" name="top_k" min="1" max="10" value="3">
+            </label>
+
+            <label class="full-width">
+              Ảnh viên thuốc
+              <input type="file" name="image" accept="image/*" capture="environment" required data-preview-target="classifyImagePreview">
+            </label>
+            <p id="classifyImagePreview" class="file-preview full-width">Chưa chọn ảnh.</p>
+
+            <button type="submit" id="classifySubmit">Phân tích ảnh</button>
+          </form>
+          <div id="classifyResult" class="result-box">Chưa có kết quả phân loại.</div>
+        </article>
+
+        <article class="card" id="buoc-3">
+          <div class="section-head compact">
+            <span class="step-tag">Bước 3</span>
+            <h2>Kiểm tra đúng toa (True/False)</h2>
+          </div>
+          <form id="checkForm" class="form-grid">
+            <label>
+              Mô hình
+              <select name="model_name" required>
+                {% for model in model_names %}
+                <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>
+                {% endfor %}
+              </select>
+            </label>
+
+            <label>
+              Số kết quả hiển thị (Top-K)
+              <input type="number" name="top_k" min="1" max="10" value="3">
+            </label>
+
+            <label class="full-width">
+              Ảnh toa thuốc / hóa đơn
+              <input type="file" name="prescription_image" accept="image/*" capture="environment" required data-preview-target="prescriptionPreview">
+            </label>
+            <p id="prescriptionPreview" class="file-preview full-width">Chưa chọn ảnh toa/hóa đơn.</p>
+
+            <label class="full-width">
+              Ảnh viên thuốc (1 hoặc nhiều ảnh, tối đa {{ max_pill_images }} ảnh/lần)
+              <input type="file" name="pill_images" accept="image/*" capture="environment" multiple required data-preview-target="pillImagesPreview" data-max-files="{{ max_pill_images }}">
+            </label>
+            <p id="pillImagesPreview" class="file-preview full-width">Chưa chọn ảnh viên thuốc.</p>
+
+            <label class="full-width checkbox-row">
+              <input type="checkbox" name="use_annotation_lookup" value="1" checked>
+              Dùng đối chiếu CSV annotation khi tên ảnh trùng dữ liệu gốc
+            </label>
+
+            <button type="submit" id="checkSubmit">Phân tích toa thuốc</button>
+          </form>
+          <div id="checkResult" class="result-box">Chưa có kết quả kiểm tra toa thuốc.</div>
+        </article>
+      </section>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

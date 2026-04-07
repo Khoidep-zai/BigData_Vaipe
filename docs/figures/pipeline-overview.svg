@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">THUOC Pipeline Overview</title>
+  <desc id="desc">End to end flow from dataset to deployment outputs.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f5f7ef"/>
+      <stop offset="100%" stop-color="#eef4ff"/>
+    </linearGradient>
+    <linearGradient id="cardA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f6fbff"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#39536e"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="760" fill="url(#bg)"/>
+  <text x="640" y="66" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="38" font-weight="700" fill="#1f3550">THUOC End-to-End Deep Learning Pipeline</text>
+  <text x="640" y="102" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="19" fill="#2a4665">Data aligned classification, model training, evaluation, ensemble, and web deployment</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#17324d">
+    <rect x="70" y="160" rx="18" ry="18" width="250" height="122" fill="url(#cardA)" stroke="#9ab2c9"/>
+    <text x="195" y="205" text-anchor="middle" font-size="24" font-weight="700">Dataset</text>
+    <text x="195" y="238" text-anchor="middle" font-size="16">data_aligned/train val test</text>
+    <text x="195" y="262" text-anchor="middle" font-size="16">104 class folders</text>
+
+    <rect x="370" y="160" rx="18" ry="18" width="250" height="122" fill="url(#cardA)" stroke="#9ab2c9"/>
+    <text x="495" y="205" text-anchor="middle" font-size="24" font-weight="700">Data Module</text>
+    <text x="495" y="238" text-anchor="middle" font-size="16">PillImageDataset</text>
+    <text x="495" y="262" text-anchor="middle" font-size="16">Augmentation and transforms</text>
+
+    <rect x="670" y="160" rx="18" ry="18" width="250" height="122" fill="url(#cardA)" stroke="#9ab2c9"/>
+    <text x="795" y="205" text-anchor="middle" font-size="24" font-weight="700">Model Factory</text>
+    <text x="795" y="238" text-anchor="middle" font-size="16">ResNet50, EfficientNet-B0</text>
+    <text x="795" y="262" text-anchor="middle" font-size="16">ViT-B/16 + ckpt mapping</text>
+
+    <rect x="970" y="160" rx="18" ry="18" width="250" height="122" fill="url(#cardA)" stroke="#9ab2c9"/>
+    <text x="1095" y="205" text-anchor="middle" font-size="24" font-weight="700">Training</text>
+    <text x="1095" y="238" text-anchor="middle" font-size="16">Mixup, EMA, AdamW</text>
+    <text x="1095" y="262" text-anchor="middle" font-size="16">Early stop + scheduler</text>
+
+    <rect x="220" y="380" rx="18" ry="18" width="260" height="124" fill="url(#cardA)" stroke="#9ab2c9"/>
+    <text x="350" y="425" text-anchor="middle" font-size="24" font-weight="700">Evaluation</text>
+    <text x="350" y="458" text-anchor="middle" font-size="16">Accuracy + Macro-F1</text>
+    <text x="350" y="482" text-anchor="middle" font-size="16">Confusion matrix</text>
+
+    <rect x="510" y="380" rx="18" ry="18" width="260" height="124" fill="url(#cardA)" stroke="#9ab2c9"/>
+    <text x="640" y="425" text-anchor="middle" font-size="24" font-weight="700">Weighted Ensemble</text>
+    <text x="640" y="458" text-anchor="middle" font-size="16">Soft voting by best val acc</text>
+    <text x="640" y="482" text-anchor="middle" font-size="16">Stable final predictions</text>
+
+    <rect x="800" y="380" rx="18" ry="18" width="260" height="124" fill="url(#cardA)" stroke="#9ab2c9"/>
+    <text x="930" y="425" text-anchor="middle" font-size="24" font-weight="700">Artifacts</text>
+    <text x="930" y="458" text-anchor="middle" font-size="16">models/results + reports</text>
+    <text x="930" y="482" text-anchor="middle" font-size="16">CSV, JSON, PNG summaries</text>
+
+    <rect x="430" y="590" rx="20" ry="20" width="420" height="112" fill="#e9f8ee" stroke="#6ea883"/>
+    <text x="640" y="632" text-anchor="middle" font-size="26" font-weight="700" fill="#204f2f">Deployment Layer</text>
+    <text x="640" y="662" text-anchor="middle" font-size="17" fill="#2f6a43">Flask API + Web UI for classify and prescription check</text>
+  </g>
+
+  <g stroke="#39536e" stroke-width="3" fill="none" marker-end="url(#arrow)">
+    <line x1="320" y1="221" x2="370" y2="221"/>
+    <line x1="620" y1="221" x2="670" y2="221"/>
+    <line x1="920" y1="221" x2="970" y2="221"/>
+    <path d="M1095 282 L1095 345 L350 345 L350 380"/>
+    <line x1="480" y1="442" x2="510" y2="442"/>
+    <line x1="770" y1="442" x2="800" y2="442"/>
+    <path d="M930 504 L930 556 L640 556 L640 590"/>
+  </g>
+</svg>

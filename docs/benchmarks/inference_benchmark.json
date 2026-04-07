@@ -1,0 +1,27 @@
+{
+  "timestamp": 1775509879,
+  "notes": "Measured via Flask test_client on local machine. Values include request handling and preprocessing.",
+  "benchmarks": {
+    "cpu": {
+      "device": "cpu",
+      "classify_single_image": {
+        "runs": 12,
+        "mean_ms": 524.34,
+        "p50_ms": 523.44,
+        "p95_ms": 572.28,
+        "min_ms": 492.86,
+        "max_ms": 608.54
+      },
+      "check_prescription_two_pills": {
+        "runs": 8,
+        "mean_ms": 2062.26,
+        "p50_ms": 2038.4,
+        "p95_ms": 2348.78,
+        "min_ms": 1764.43,
+        "max_ms": 2408.32
+      }
+    },
+    "cuda": null,
+    "cuda_note": "CUDA not available in this environment."
+  }
+}

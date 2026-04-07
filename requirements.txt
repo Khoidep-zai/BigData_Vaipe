@@ -28,6 +28,11 @@ Pillow>=10.0.0
 # Used for: Saving evaluation_summary.csv, metrics aggregation
 pandas>=2.0.0
 
+# Flask: Lightweight web framework for THUOC web UI + REST API
+# v3.0+: Modern Werkzeug stack, async-friendly internals
+# Used for: Web upload UI, model inference API, prescription true/false checks
+Flask>=3.0.0
+
 # Matplotlib: Data visualization (plotting, charting)
 # v3.7+: Backend improvements, better font rendering
 # Used for: Training curves (loss/accuracy plots), confusion matrices, comparison charts

@@ -1,9 +1,23 @@
 [
   {
     "model": "resnet50",
-    "accuracy": 0.0,
-    "macro_f1": 0.0,
-    "num_samples": 5.0,
+    "accuracy": 0.375,
+    "macro_f1": 0.09162760775664001,
+    "num_samples": 64.0,
     "checkpoint": "models/AI/resnet50/resnet50_epillid_best.pt"
+  },
+  {
+    "model": "efficientnet_b0",
+    "accuracy": 0.421875,
+    "macro_f1": 0.10611111111111111,
+    "num_samples": 64.0,
+    "checkpoint": "models/AI/efficientnet/efficientnet_b0_epillid_best.pt"
+  },
+  {
+    "model": "vit_b_16",
+    "accuracy": 0.265625,
+    "macro_f1": 0.08270508203281313,
+    "num_samples": 64.0,
+    "checkpoint": "models/AI/vit_b_16/vit_b_16_epillid_best.pt"
   }
 ]

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">THUOC Web Architecture</title>
+  <desc id="desc">Client to API flow with classification and prescription matching.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#eef7ff"/>
+      <stop offset="100%" stop-color="#effaf2"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#3f5b6f"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="760" fill="url(#bg)"/>
+  <text x="640" y="62" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="38" font-weight="700" fill="#1f3d57">THUOC Web Deployment Architecture</text>
+  <text x="640" y="98" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="19" fill="#315577">Optimized flow with request safety, caching, and batch inference</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#1f3146">
+    <rect x="75" y="170" width="270" height="150" rx="20" ry="20" fill="#ffffff" stroke="#9db6cd" stroke-width="1.8"/>
+    <text x="210" y="218" text-anchor="middle" font-size="25" font-weight="700">Frontend UI</text>
+    <text x="210" y="248" text-anchor="middle" font-size="16">index.html + app.js + css</text>
+    <text x="210" y="276" text-anchor="middle" font-size="16">Abort stale requests</text>
+    <text x="210" y="302" text-anchor="middle" font-size="16">Input validation + loading states</text>
+
+    <rect x="395" y="170" width="270" height="150" rx="20" ry="20" fill="#ffffff" stroke="#9db6cd" stroke-width="1.8"/>
+    <text x="530" y="218" text-anchor="middle" font-size="25" font-weight="700">Flask API</text>
+    <text x="530" y="248" text-anchor="middle" font-size="16">health, overview, classify</text>
+    <text x="530" y="276" text-anchor="middle" font-size="16">check-prescription endpoints</text>
+    <text x="530" y="302" text-anchor="middle" font-size="16">JSON-only error responses</text>
+
+    <rect x="715" y="170" width="270" height="150" rx="20" ry="20" fill="#ffffff" stroke="#9db6cd" stroke-width="1.8"/>
+    <text x="850" y="218" text-anchor="middle" font-size="25" font-weight="700">Inference Layer</text>
+    <text x="850" y="248" text-anchor="middle" font-size="16">Model checkpoint cache</text>
+    <text x="850" y="276" text-anchor="middle" font-size="16">Batch classify pill images</text>
+    <text x="850" y="302" text-anchor="middle" font-size="16">Top-K + medicine mapping</text>
+
+    <rect x="1035" y="170" width="170" height="150" rx="20" ry="20" fill="#ffffff" stroke="#9db6cd" stroke-width="1.8"/>
+    <text x="1120" y="218" text-anchor="middle" font-size="24" font-weight="700">Artifacts</text>
+    <text x="1120" y="248" text-anchor="middle" font-size="15">models/AI</text>
+    <text x="1120" y="272" text-anchor="middle" font-size="15">results/reports</text>
+    <text x="1120" y="296" text-anchor="middle" font-size="15">data/csv</text>
+
+    <rect x="210" y="420" width="390" height="240" rx="20" ry="20" fill="#f8fbff" stroke="#a5b7cb" stroke-width="1.8"/>
+    <text x="405" y="464" text-anchor="middle" font-size="27" font-weight="700">Classify Flow</text>
+    <text x="250" y="508" font-size="19">1) Upload one pill image</text>
+    <text x="250" y="544" font-size="19">2) Run model inference</text>
+    <text x="250" y="580" font-size="19">3) Return class id + medicine name</text>
+    <text x="250" y="616" font-size="19">4) Render top-k with confidence</text>
+
+    <rect x="670" y="420" width="400" height="240" rx="20" ry="20" fill="#f4fff5" stroke="#8ebf98" stroke-width="1.8"/>
+    <text x="870" y="464" text-anchor="middle" font-size="27" font-weight="700">Prescription Match Flow</text>
+    <text x="710" y="508" font-size="19">1) Upload prescription + pill images</text>
+    <text x="710" y="544" font-size="19">2) Batch classify all pills</text>
+    <text x="710" y="580" font-size="19">3) Compare predicted ids with CSV context</text>
+    <text x="710" y="616" font-size="19">4) Return true false + out-of-prescription</text>
+  </g>
+
+  <g stroke="#3f5b6f" stroke-width="3" fill="none" marker-end="url(#arrow)">
+    <line x1="345" y1="245" x2="395" y2="245"/>
+    <line x1="665" y1="245" x2="715" y2="245"/>
+    <line x1="985" y1="245" x2="1035" y2="245"/>
+    <line x1="530" y1="320" x2="405" y2="420"/>
+    <line x1="850" y1="320" x2="870" y2="420"/>
+  </g>
+</svg>

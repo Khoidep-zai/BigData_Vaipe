@@ -283,6 +283,60 @@ models/
 
 ---
 
+## README REPORTING STANDARD (VLU RnD STYLE)
+
+Khi cap nhat README cho du an, can viet theo dang bao cao nhom sinh vien nghien cuu:
+
+```text
+Bat buoc co Muc luc + Tong quan + Muc tieu + Kien truc + Du lieu + Phuong phap
+Bat buoc co section Ket qua va hinh minh hoa (evaluation chart + confusion matrix)
+Bat buoc co section Loi ich thuc tien + Huong tich hop tuong lai
+Bat buoc mo ta ro command chay train/eval/web
+```
+
+Anh minh hoa uu tien:
+
+```text
+docs/figures/pipeline-overview.svg
+docs/figures/training-strategy.svg
+docs/figures/web-architecture.svg
+models/results/evaluation/evaluation_comparison.png
+models/reports/latest/confusion_matrix_*.png
+```
+
+Neu artifact PNG chua co, can huong dan nguoi dung chay:
+
+```bash
+python run_all.py --compare-only
+```
+
+---
+
+## WEB QUALITY CHECKLIST (Flask + Frontend)
+
+Khi sua Web/, AI phai check:
+
+```text
+API error responses la JSON ro rang (khong tra HTML error khong kiem soat)
+Validate input files (bat buoc co file, dung extension, gioi han so anh)
+Khong classify nhieu pill theo vong lap infer tung anh neu co the batch infer
+Overview endpoint co cache hoac co co che tranh quet du lieu qua nang
+Frontend tranh request chong len nhau (abort stale requests)
+Nút submit co loading/disable de UX on dinh
+```
+
+Smoke checks toi thieu:
+
+```bash
+python Web/app.py
+# GET /api/health
+# GET /api/overview?force=1
+# POST /api/classify
+# POST /api/check-prescription
+```
+
+---
+
 ## KHI GAP AMBIGUITY
 
 Can clarify truoc khi implement:
@@ -307,7 +361,9 @@ Assumption mac dinh:
 | Mar 2026 | Augmentation: blur + sharpness + random erasing mo rong | Robust hon voi anh mo/sac | Pending verify |
 | Mar 2026 | image_to_numeric_vector: them HSV hist + edge density + quadrant luminance | Vector thong tin phong phu hon | Pending verify |
 | Mar 2026 | train.py: warmup va scheduler tinh chinh | On dinh hoi tu dau pha unfreeze | Pending verify |
+| Apr 2026 | README viet lai theo format bao cao VLU + bo hinh docs/figures | Phuc vu trinh bay nghien cuu khoa hoc | In use |
+| Apr 2026 | Web: them overview cache + batch infer + frontend abort request | Tang do muot va giam loi logic | In use |
 
 ---
 
-AGENTS.md v2.5 — THUOC edition, March 2026
+AGENTS.md v2.6 — THUOC edition, April 2026

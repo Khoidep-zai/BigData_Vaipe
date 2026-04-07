@@ -35,3 +35,10 @@ models/**/terminal_review_history.json
 /.idea/
 /.vscode/
 
+# Web runtime uploads
+/Web/uploads/
+
+/venv/
+/.venv/
+venv/
+.venv/
