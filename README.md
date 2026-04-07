@@ -21,6 +21,7 @@
 - [12. Cấu trúc dự án](#12-cấu-trúc-dự-án)
 - [13. Đóng góp nhóm nghiên cứu](#13-đóng-góp-nhóm-nghiên-cứu)
 - [14. Giấy phép](#14-giấy-phép)
+- [15. Cấu hình máy khuyến nghị và gợi ý Colab/Cloud GPU](#15-cấu-hình-máy-khuyến-nghị-và-gợi-ý-colabcloud-gpu)
 
 ---
 
@@ -56,14 +57,20 @@ Dự án xây dựng pipeline đầy đủ từ huấn luyện đến triển kh
 
 ![Pipeline tổng thể THUOC](docs/figures/pipeline-overview.svg)
 
-Pipeline gồm 6 lớp chức năng:
+Hệ thống được tổ chức thành 6 lớp chức năng chính:
 
-1. Data module: đọc ảnh và augmentation.
-2. Model factory: khởi tạo/tải checkpoint đúng class mapping.
-3. Training engine: tối ưu mô hình với regularization.
-4. Evaluation: đo hiệu năng chi tiết.
-5. Ensemble: kết hợp xác suất nhiều mô hình.
-6. Runtime/Web: cung cấp API và giao diện sử dụng.
+1. Lớp dữ liệu: đọc ảnh từ bộ train/val/test, áp dụng biến đổi ảnh phù hợp cho từng pha.
+2. Lớp khởi tạo mô hình: tạo mô hình theo tên và tải checkpoint đúng ánh xạ nhãn class_to_idx.
+3. Lớp huấn luyện: tối ưu tham số mô hình, theo dõi hội tụ và kiểm soát overfitting.
+4. Lớp đánh giá: tính Accuracy, Macro-F1, confusion matrix và tổng hợp báo cáo.
+5. Lớp tổ hợp mô hình: kết hợp xác suất từ nhiều mô hình theo trọng số để tăng độ ổn định.
+6. Lớp triển khai runtime/web: cung cấp API Flask và giao diện để người dùng thao tác trực tiếp.
+
+### 3.1. Luồng xử lý tổng quát
+1. Ảnh đầu vào được tiền xử lý và chuẩn hóa.
+2. Mô hình dự đoán xác suất theo từng lớp.
+3. Hệ thống đánh giá, lưu artifacts và xuất báo cáo.
+4. Web/API trả kết quả phân loại hoặc kết quả kiểm tra theo toa thuốc.
 
 ---
 
@@ -106,9 +113,9 @@ Pipeline gồm 6 lớp chức năng:
 ![Chiến lược huấn luyện và đánh giá](docs/figures/training-strategy.svg)
 
 ### 6.1. Kỹ thuật tối ưu chính
-- Huấn luyện theo pha freeze/unfreeze.
-- Optimizer AdamW + scheduler ReduceLROnPlateau.
-- Early stopping, gradient clipping, EMA, mixup, label smoothing.
+- Huấn luyện theo hai giai đoạn khóa/mở khóa tham số (freeze/unfreeze) để ổn định giai đoạn đầu.
+- Dùng bộ tối ưu AdamW kết hợp lịch giảm tốc độ học ReduceLROnPlateau.
+- Áp dụng dừng sớm (early stopping), cắt ngưỡng gradient, EMA, mixup, label smoothing để tăng khả năng tổng quát hóa.
 
 ### 6.2. Cấu hình mặc định đang dùng
 
@@ -117,6 +124,11 @@ Pipeline gồm 6 lớp chức năng:
 | ResNet50 | 6e-5 | 1.2e-3 | 0.16 | 0.35 | 28 | 6 |
 | EfficientNet-B0 | 7e-5 | 1e-3 | 0.15 | 0.33 | 28 | 6 |
 | ViT-B/16 | 5e-5 | 1.4e-3 | 0.20 | 0.42 | 32 | 7 |
+
+### 6.3. Nguyên tắc chọn checkpoint tốt nhất
+- Mỗi mô hình lưu checkpoint tốt nhất theo tập validation.
+- Khi đánh giá và suy luận, luôn ưu tiên checkpoint best để đảm bảo chất lượng ổn định.
+- Kết quả cuối cùng có thể tổ hợp bằng ensemble để giảm dao động giữa các mô hình đơn.
 
 ---
 
@@ -193,29 +205,73 @@ Tài liệu chi tiết phần web: xem Web/README.md.
 
 ## 9. Hướng dẫn cài đặt và vận hành
 
-### 9.1. Cài thư viện
+### 9.1. Tạo môi trường ảo venv (khuyến nghị cho mọi máy)
+Windows PowerShell:
+
 ```bash
+py -3.10 -m venv .venv
+```
+
+Windows CMD:
+
+```bash
+py -3.10 -m venv .venv
+```
+
+macOS/Linux:
+
+```bash
+python3 -m venv .venv
+```
+
+### 9.2. Kích hoạt môi trường venv
+Windows PowerShell:
+
+```bash
+.venv\Scripts\Activate.ps1
+```
+
+Windows CMD:
+
+```bash
+.venv\Scripts\activate.bat
+```
+
+macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+### 9.3. Nâng cấp pip và cài thư viện
+```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 9.2. Chạy pipeline đầy đủ
+### 9.4. Chạy pipeline đầy đủ
 ```bash
 python run_all.py
 ```
 
-### 9.3. Chỉ đánh giá checkpoint có sẵn
+### 9.5. Chỉ đánh giá checkpoint có sẵn
 ```bash
 python run_all.py --compare-only
 ```
 
-### 9.4. Chạy Web app
+### 9.6. Chạy Web app
 ```bash
 python Web/app.py
 ```
 
-### 9.5. Kiểm thử
+### 9.7. Kiểm thử
 ```bash
 python -m pytest tests/ -q
+```
+
+### 9.8. Thoát môi trường ảo
+```bash
+deactivate
 ```
 
 ---
@@ -255,22 +311,52 @@ Có. Hệ thống có API rõ ràng nên dễ tích hợp vào dashboard, kiosk 
 
 ```text
 THUOC/
-├── run_all.py
-├── train_cli.py
-├── Web/
-├── src/
-│   ├── data/
-│   ├── models/
-│   ├── training/
-│   ├── evaluation/
-│   ├── inference/
-│   └── orchestration/
-├── Review/
-├── models/
-├── data_aligned/
-├── tests/
-└── docs/
-    └── figures/
+├── run_all.py                          # 🚀 Điều phối pipeline train/evaluate/ensemble/report
+├── train_cli.py                        # 🧪 Chạy từng chế độ train, optimize, prescription matching
+├── requirements.txt                    # 📦 Danh sách thư viện cần cài
+├── AGENTS.md                           # 📘 Quy ước kỹ thuật và checklist phát triển
+├── README.md                           # 📖 Tài liệu hướng dẫn và báo cáo dự án
+│
+├── src/                                # 🧠 Mã nguồn lõi học máy
+│   ├── data/                           # 🗂️ Dataset, transform, metadata, chuẩn hóa dữ liệu
+│   │   ├── features.py                 # 🖼️ Dataset class + pipeline tiền xử lý
+│   │   ├── data_setup.py               # 🧱 Kiểm tra/chuẩn bị cấu trúc dữ liệu
+│   │   ├── metadata.py                 # 🏷️ Quản lý thông tin nhãn và ánh xạ
+│   │   └── prescription_csv_builder.py # 🧾 Tạo dữ liệu ngữ cảnh toa thuốc
+│   ├── models/                         # 🤖 Định nghĩa mô hình và factory
+│   │   ├── resnet50.py                 # CNN ResNet50
+│   │   ├── efficientnet_b0.py          # EfficientNet-B0
+│   │   ├── vit_b_16.py                 # Vision Transformer B/16
+│   │   └── model_factory.py            # Tạo/tải mô hình theo tên + checkpoint
+│   ├── training/                       # 🏋️ Vòng lặp huấn luyện và tối ưu hóa
+│   │   └── train.py                    # Train loop, early-stop, scheduler, EMA...
+│   ├── evaluation/                     # 📊 Đánh giá và tạo báo cáo thực nghiệm
+│   │   └── evaluate_report.py          # Accuracy, Macro-F1, confusion matrix
+│   ├── inference/                      # 🔍 Suy luận ảnh và kiểm tra theo toa
+│   │   ├── inference.py                # Suy luận phân loại ảnh thuốc
+│   │   └── prescription_matching.py    # So khớp thuốc với ngữ cảnh toa
+│   ├── orchestration/                  # 🧩 Điều phối các bước trong pipeline
+│   │   └── pipeline.py                 # Liên kết train/evaluate/ensemble/report
+│   └── utils/                          # 🛠️ Tiện ích đường dẫn và runtime artifacts
+│
+├── Web/                                # 🌐 Ứng dụng web Flask
+│   ├── app.py                          # Điểm chạy web app
+│   ├── backend/                        # API backend
+│   └── frontend/                       # Giao diện HTML/CSS/JS
+│
+├── Review/                             # 📈 Cấu hình tối ưu và script review
+│   ├── optimal_configs.py              # Bộ siêu tham số tối ưu
+│   └── review_terminal.py              # Script hỗ trợ rà soát kết quả
+│
+├── models/                             # 🧾 Artifacts sinh ra từ huấn luyện/đánh giá
+│   ├── AI/                             # Checkpoint và kết quả theo từng mô hình
+│   ├── results/                        # Bảng tổng hợp training/evaluation
+│   └── reports/                        # Báo cáo mới nhất + confusion matrix
+│
+├── data/                               # 🗃️ Dữ liệu gốc, ảnh và CSV nghiệp vụ
+├── data_aligned/                       # 🧱 Dữ liệu đã chuẩn hóa theo train/val/test
+├── docs/                               # 🖼️ Hình minh họa, sơ đồ và benchmark
+└── tests/                              # ✅ Bộ kiểm thử tự động bằng pytest
 ```
 
 ---
@@ -291,3 +377,54 @@ THUOC/
 Dự án phát hành theo giấy phép MIT cho mục đích học tập và nghiên cứu.
 
 Nếu sử dụng dữ liệu/ảnh trong báo cáo hoặc demo, vui lòng tuân thủ điều khoản dữ liệu của đơn vị cung cấp.
+
+---
+
+## 15. Cấu hình máy khuyến nghị và gợi ý Colab/Cloud GPU
+
+### 15.1. Cấu hình tối thiểu (chạy được)
+- CPU: từ 4 nhân
+- RAM: từ 8 GB
+- Lưu trữ trống: tối thiểu 20 GB
+- Python: 3.10+
+- GPU: không bắt buộc (có thể chạy CPU, thời gian sẽ dài hơn)
+
+### 15.2. Cấu hình đề xuất (chạy mượt)
+- CPU: 6-8 nhân trở lên
+- RAM: 16 GB trở lên
+- GPU: NVIDIA 6-12 GB VRAM (ví dụ RTX 2060/3060/4060)
+- Lưu trữ SSD trống: 40 GB+
+
+### 15.3. Khi nào nên dùng Colab hoặc Cloud GPU
+- Khi huấn luyện đầy đủ cả 3 mô hình mất quá nhiều thời gian trên máy cá nhân.
+- Khi cần tăng tốc quá trình tuning hoặc chạy nhiều vòng thí nghiệm.
+- Khi máy local không có CUDA hoặc VRAM thấp.
+
+### 15.4. Gợi ý chạy trên Google Colab
+1. Bật Runtime GPU (T4/L4/A100 tùy gói).
+2. Clone repo và cài thư viện:
+
+```bash
+git clone <repo_url>
+cd THUOC
+pip install -r requirements.txt
+```
+
+3. Chạy evaluate nhanh với checkpoint có sẵn:
+
+```bash
+python run_all.py --compare-only
+```
+
+4. Khi cần train đầy đủ:
+
+```bash
+python run_all.py
+```
+
+### 15.5. Gợi ý nền tảng Cloud GPU khác
+- Kaggle Notebooks (GPU miễn phí theo quota).
+- Google Colab Pro/Pro+ (dễ dùng, triển khai nhanh).
+- Paperspace, RunPod, Lambda Cloud (linh hoạt cấu hình GPU).
+
+Khuyến nghị: dùng CPU cho kiểm thử logic và chạy compare-only; dùng Colab/Cloud GPU cho train chính thức và thí nghiệm nhiều vòng.
